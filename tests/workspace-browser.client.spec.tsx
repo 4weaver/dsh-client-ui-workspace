@@ -478,6 +478,15 @@ describe('WorkspaceBrowser', () => {
       && (parentRow.compareDocumentPosition(childRow) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
     expect(childRow?.getAttribute('draggable')).toBe('false')
     expect(childRow?.querySelector('[aria-label="收起分支会话"]')).toBeNull()
+    // The indent wrapper must be a BLOCK box (display:block in the stylesheet)
+    // and must contain exactly the one row: an inline wrapper would leave the
+    // nested row at full container width, which is the width bug this rebuild
+    // exists to avoid. jsdom cannot measure layout, so assert structure here
+    // and the built CSS in the bundle-contract/runtime checks.
+    // Row -> HoverCard wrapper span -> .forkChild indent block.
+    const wrapper = childRow?.parentElement?.parentElement
+    expect(wrapper?.className).toContain('forkChild')
+    expect(wrapper?.firstElementChild?.contains(childRow as Node)).toBe(true)
     // the depth-0 parent stays draggable
     expect(parentRow?.getAttribute('draggable')).toBe('true')
     // collapsing the parent hides the child row (its portaled hover copy may stay)

@@ -362,7 +362,10 @@
 /* Fork tree: one indent unit; chevron rides the official 16px .slot inside the row. */
 .forkSlot { color: var(--dsw-alias-label-caption); cursor: pointer; }
 /* Pure indentation, no rail (user decision: rail later if wanted). */
-.forkChild { padding-left: var(--fork-indent, 16px); }
+/* display:block is load-bearing: an inline wrapper does not inset the row's
+   content box, so a nested .sessionRow would keep full container width and the
+   indent would be cosmetic only (the 'row width does not follow depth' bug). */
+.forkChild { display: block; padding-left: var(--fork-indent, 16px); }
 
 @media (prefers-reduced-motion: reduce) {
   .sessionRow,

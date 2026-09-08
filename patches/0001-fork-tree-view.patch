@@ -21,17 +21,20 @@ index af0f535b68..a8c82cc889 100644
    'empty.noMatches': 'No matches',
    'workspace.add': 'Add workspace',
 diff --git a/packages/client/ui-workspace/src/client/rows/Rows.module.css b/packages/client/ui-workspace/src/client/rows/Rows.module.css
-index 7208d4d4b1..36575a68c2 100644
+index 7208d4d4b1..9e837d3f54 100644
 --- a/packages/client/ui-workspace/src/client/rows/Rows.module.css
 +++ b/packages/client/ui-workspace/src/client/rows/Rows.module.css
-@@ -359,6 +359,11 @@
+@@ -359,6 +359,14 @@
    color: var(--dsw-alias-label-caption);
  }
  
 +/* Fork tree: one indent unit; chevron rides the official 16px .slot inside the row. */
 +.forkSlot { color: var(--dsw-alias-label-caption); cursor: pointer; }
 +/* Pure indentation, no rail (user decision: rail later if wanted). */
-+.forkChild { padding-left: var(--fork-indent, 16px); }
++/* display:block is load-bearing: an inline wrapper does not inset the row's
++   content box, so a nested .sessionRow would keep full container width and the
++   indent would be cosmetic only (the 'row width does not follow depth' bug). */
++.forkChild { display: block; padding-left: var(--fork-indent, 16px); }
 +
  @media (prefers-reduced-motion: reduce) {
    .sessionRow,
@@ -495,7 +498,7 @@ index ec921306f9..202211bfa3 100644
   * Derive the flat session list ("In one list" mode): every session — fork
   * children included — as a top-level row, strictly newest-first. No grouping,
 diff --git a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
-index 8ee31d37c9..8ca4140f8f 100644
+index 8ee31d37c9..49b9f15c85 100644
 --- a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
 +++ b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
 @@ -453,7 +453,10 @@ describe('WorkspaceBrowser', () => {
@@ -510,7 +513,7 @@ index 8ee31d37c9..8ca4140f8f 100644
      const parent = summary('parent-s', 2)
      const child = { ...summary('child-s', 1), parentId: parent.id }
      mount({
-@@ -461,9 +464,51 @@ describe('WorkspaceBrowser', () => {
+@@ -461,9 +464,60 @@ describe('WorkspaceBrowser', () => {
        useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
      })
      fireEvent.click(screen.getByText('alpha'))
@@ -531,6 +534,15 @@ index 8ee31d37c9..8ca4140f8f 100644
 +      && (parentRow.compareDocumentPosition(childRow) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
 +    expect(childRow?.getAttribute('draggable')).toBe('false')
 +    expect(childRow?.querySelector('[aria-label="收起分支会话"]')).toBeNull()
++    // The indent wrapper must be a BLOCK box (display:block in the stylesheet)
++    // and must contain exactly the one row: an inline wrapper would leave the
++    // nested row at full container width, which is the width bug this rebuild
++    // exists to avoid. jsdom cannot measure layout, so assert structure here
++    // and the built CSS in the bundle-contract/runtime checks.
++    // Row -> HoverCard wrapper span -> .forkChild indent block.
++    const wrapper = childRow?.parentElement?.parentElement
++    expect(wrapper?.className).toContain('forkChild')
++    expect(wrapper?.firstElementChild?.contains(childRow as Node)).toBe(true)
 +    // the depth-0 parent stays draggable
 +    expect(parentRow?.getAttribute('draggable')).toBe('true')
 +    // collapsing the parent hides the child row (its portaled hover copy may stay)

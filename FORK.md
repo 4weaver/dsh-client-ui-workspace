@@ -31,8 +31,9 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
   `collapsedForestRows` / `countForestRows` preview budget counted over TOTAL
   rows (root + descendants, depth-first, limit 5), and per-row fold state.
 - `src/client/rows/Rows.module.css` (+5) — `.forkSlot` (chevron colour/cursor)
-  and `.forkChild { padding-left: var(--fork-indent, 16px) }`. Pure indentation,
-  no rail / border-left.
+  and `.forkChild { display: block; padding-left: var(--fork-indent, 16px) }`.
+  Block level is load-bearing (an inline wrapper does not inset the row's
+  content box). Pure indentation, no rail / border-left.
 - `src/client/locales.ts` (+4) — `sessions.twist.expand` / `.collapse` (zh + en).
 - `tests/workspace-browser.client.spec.tsx` — nesting + total-row preview budget.
 
@@ -41,7 +42,7 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
 - Repo: https://github.com/deepseek-ai/deepseek-harness
 - Base tag: `dsh-v0.1.2-rc.1`
 - Base commit: `a66e470204` (release(dsh): 0.1.2-rc.1)
-- Development branch: `forktree/dev` @ `9c30c5a9d4` (on top of `a66e470204`)
+- Development branch: `forktree/dev` @ `de001cb4ba` (on top of `a66e470204`)
 - License: MIT (upstream `LICENSE` retained)
 
 ## How `lib/` is produced
