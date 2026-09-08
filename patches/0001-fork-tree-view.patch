@@ -1,0 +1,440 @@
+diff --git a/packages/client/ui-workspace/src/client/rows/Rows.module.css b/packages/client/ui-workspace/src/client/rows/Rows.module.css
+index 7208d4d4b1..05ece362c8 100644
+--- a/packages/client/ui-workspace/src/client/rows/Rows.module.css
++++ b/packages/client/ui-workspace/src/client/rows/Rows.module.css
+@@ -359,6 +359,54 @@
+   color: var(--dsw-alias-label-caption);
+ }
+ 
++/* Fork-tree view: rows indent under a guide-line as human fork children nest. */
++.sessionTreeBlock {
++  width: 100%;
++  min-width: 0;
++}
++
++.treeRow {
++  position: relative;
++  display: flex;
++  align-items: flex-start;
++  gap: 0;
++  width: 100%;
++  min-width: 0;
++}
++
++.nodeCaret {
++  appearance: none;
++  border: 0;
++  background: transparent;
++  margin: 0;
++  padding: 7px 2px 0 0;
++  flex: none;
++  width: 18px;
++  height: 100%;
++  display: inline-flex;
++  align-items: flex-start;
++  justify-content: center;
++  color: var(--dsw-alias-label-tertiary);
++  cursor: pointer;
++}
++
++.nodeCaretSpacer {
++  flex: none;
++  width: 18px;
++}
++
++.nodeCaret:hover { color: var(--dsw-alias-label-primary); }
++
++.nodeCaret svg { width: 9px; height: 9px; transition: transform 120ms var(--ds-ease-in-out); }
++.nodeCaretOpen svg { transform: rotate(90deg); }
++
++.nodeChildren {
++  display: flex;
++  flex-direction: column;
++  margin: 0 0 0 18px;
++  padding-left: 8px;
++  border-left: 1px solid var(--dsw-alias-border-l2, var(--dsw-alias-border-l, rgba(128,128,128,.25)));
++}
+ @media (prefers-reduced-motion: reduce) {
+   .sessionRow,
+   .arrow {
+diff --git a/packages/client/ui-workspace/src/client/rows/Rows.tsx b/packages/client/ui-workspace/src/client/rows/Rows.tsx
+index 0f917100ff..0529ea52c3 100644
+--- a/packages/client/ui-workspace/src/client/rows/Rows.tsx
++++ b/packages/client/ui-workspace/src/client/rows/Rows.tsx
+@@ -16,7 +16,7 @@ import {
+ import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
+ import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
+ import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+-import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
++import type { GroupNode, SearchResultNode, SessionNode, SessionTreeNode } from '../tree.ts'
+ import css from './Rows.module.css'
+ 
+ /** The standard locale seat, prop-passed from the browser root. */
+@@ -499,3 +499,74 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+     />
+   )
+ }
++
++/**
++ * One expandable workspace-browser row in the optional fork-tree view.
++ * The parent row is wrapped with a caret only when it has children; recursing
++ * under `.nodeChildren` nests human fork / subagent-forks depth-first. Root rows
++ * receive the browser's drag props via `drag`; deeper rows render non-draggable.
++ */
++export function SessionTreeNodeItem({ node, now, currentId, collapsed, onToggle, onOpen, onRename, onFork, onArchive, t, drag }: {
++  node: SessionTreeNode
++  now: number
++  currentId: string | undefined
++  collapsed: boolean
++  onToggle: (id: SessionTreeNode['id']) => void
++  onOpen: (id: SessionTreeNode['id']) => void
++  onRename: (id: SessionTreeNode['id'], title: string) => void
++  onFork: (id: SessionTreeNode['id']) => void
++  onArchive: (id: SessionTreeNode['id']) => void
++  t: RowTranslate
++  drag?: { marker: 'before' | 'after' | null; start(): void; active: boolean; hover(h: 'before' | 'after'): void; drop(h: 'before' | 'after'): void; end(): void } | undefined
++}) {
++  const hasKids = node.children.length > 0
++  return (
++    <div className={css.sessionTreeBlock}>
++      <div className={css.treeRow}>
++        {hasKids ? (
++          <button
++            type="button"
++            aria-label={collapsed ? 'Expand' : 'Collapse'}
++            aria-expanded={!collapsed}
++            className={clsx(css.nodeCaret, !collapsed && css.nodeCaretOpen)}
++            onClick={(e) => { e.stopPropagation(); onToggle(node.id) }}
++          >
++            <IconTriangleRightFill14 />
++          </button>
++        ) : (
++          <span className={css.nodeCaretSpacer} />
++        )}
++        <SessionNodeItem
++          node={node}
++          currentId={currentId}
++          now={now}
++          onOpen={onOpen}
++          onRename={onRename}
++          onFork={onFork}
++          onArchive={onArchive}
++          drag={drag}
++          t={t}
++        />
++      </div>
++      {!collapsed && node.children.length > 0 && (
++        <div className={css.nodeChildren}>
++          {node.children.map(child => (
++            <SessionTreeNodeItem
++              key={child.id}
++              node={child}
++              now={now}
++              currentId={currentId}
++              collapsed={false}
++              onToggle={onToggle}
++              onOpen={onOpen}
++              onRename={onRename}
++              onFork={onFork}
++              onArchive={onArchive}
++              t={t}
++            />
++          ))}
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+index 9d9dd376e4..cb37978dbf 100644
+--- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
++++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+@@ -21,9 +21,9 @@ import type {
+ import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+-import type { SessionNode, SessionOrderBy } from '../tree.ts'
+-import { deriveFlat, deriveGroups, deriveSearchResults, UNGROUPED_KEY } from '../tree.ts'
+-import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
++import type { SessionNode, SessionOrderBy, SessionTreeNode } from '../tree.ts'
++import { deriveFlat, deriveGroupForest, deriveGroups, deriveSearchResults, UNGROUPED_KEY } from '../tree.ts'
++import { ProjectRowItem, SearchResultItem, SessionNodeItem, SessionTreeNodeItem } from './Rows.tsx'
+ import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
+ import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
+ import css from './WorkspaceBrowser.module.css'
+@@ -279,6 +279,8 @@ function SessionTree({
+   // Transient drag marker state; the selected mode owns the resulting order.
+   const [drag, setDrag] = useState<DragState | null>(null)
+   const sessionDropCommitted = useRef(false)
++  // Per-browser collapse of a fork-tree root (children stay visible by default).
++  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set())
+   const [workspaceDrag, setWorkspaceDrag] = useState<WorkspaceDragState | null>(null)
+   const workspaceDropCommitted = useRef(false)
+   const previousOrderBy = useRef(orderBy)
+@@ -347,6 +349,23 @@ function SessionTree({
+     }),
+     [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount],
+   )
++  // Fork-tree view (grouped mode): parallel per-group forest used only for
++  // rendering top-level rows recursively. `groups`/.sessions stays authoritative
++  // for drag arithmetic, overflow counting and flat render.
++  const forests = useMemo(
++    () => {
++      const map = new Map<string, readonly SessionTreeNode[]>()
++      for (const gg of deriveGroupForest(list, orderedWorkspaces, archivedSessionIds, pendingInteractions, {
++        expandedGroups,
++        ...(sessionOrderByAccount[UNGROUPED_KEY] === undefined ? {} : { ungroupedOrder: sessionOrderByAccount[UNGROUPED_KEY] }),
++      })) {
++        map.set(gg.key, gg.forest ?? [])
++      }
++      return map
++    },
++    [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount],
++  )
++
+   const now = Date.now()
+   const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
+     if (sessionDropCommitted.current) return
+@@ -525,50 +544,87 @@ function SessionTree({
+                     },
+                   }}
+               />
+-              {(sessionsExpanded
+-                ? group.sessions
+-                : collapsed.rows
+-              ).map((node) => {
+-              // Session drag never leaves its group. Ungrouped writes only the
+-              // browser-local account; real Workspaces may also write Host order.
+-                const sameGroupDrag = drag !== null && drag.accountKey === group.key
+-                const dragProps = {
+-                  start: () => {
+-                    sessionDropCommitted.current = false
+-                    setDrag({ accountKey: group.key, sessionId: node.id, over: null })
+-                  },
+-                  active: sameGroupDrag,
+-                  marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
+-                  hover: (half: 'before' | 'after') => {
+-                  /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
+-                    setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
+-                  },
+-                  drop: (half: 'before' | 'after') => {
+-                  /* v8 ignore next -- narrowing guard: Rows gates drop on `active`, which is false while the drag state is null. */
+-                    if (drag === null) return
+-                    commitSessionDrag(drag, { id: node.id, half })
+-                  },
+-                  end: () => {
+-                    if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
+-                    else setDrag(null)
+-                    sessionDropCommitted.current = false
+-                  },
+-                }
+-                return (
+-                  <SessionNodeItem
+-                    key={node.id}
+-                    node={node}
+-                    currentId={current}
+-                    now={now}
+-                    onOpen={open}
+-                    onRename={onSessionRename}
+-                    onFork={forkSession}
+-                    onArchive={onSessionArchive}
+-                    drag={dragProps}
+-                    t={t}
+-                  />
+-                )
+-              })}
++              {sessionsExpanded
++                ? (forests.get(group.key) ?? []).map((root) => {
++                    // Root (depth-0) rows get drag; deeper rows recurse non-draggable.
++                    const sameRootDrag = drag !== null && drag.accountKey === group.key
++                    const rootDragProps = {
++                      start: () => {
++                        sessionDropCommitted.current = false
++                        setDrag({ accountKey: group.key, sessionId: root.id, over: null })
++                      },
++                      active: sameRootDrag,
++                      marker: sameRootDrag && drag.over?.id === root.id ? drag.over.half : null,
++                      hover: (half: 'before' | 'after') => {
++                      /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
++                        setDrag(d => (d === null ? d : { ...d, over: { id: root.id, half } }))
++                      },
++                      drop: (half: 'before' | 'after') => {
++                      /* v8 ignore next -- narrowing guard */
++                        if (drag === null) return
++                        commitSessionDrag(drag, { id: root.id, half })
++                      },
++                      end: () => {
++                        if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
++                        else setDrag(null)
++                        sessionDropCommitted.current = false
++                      },
++                    }
++                    return (
++                      <SessionTreeNodeItem
++                        key={root.id}
++                        node={root}
++                        now={now}
++                        currentId={current}
++                        collapsed={collapsedNodes.has(root.id)}
++                        onToggle={(id) => setCollapsedNodes(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
++                        onOpen={open}
++                        onRename={onSessionRename}
++                        onFork={forkSession}
++                        onArchive={onSessionArchive}
++                        t={t}
++                        drag={rootDragProps}
++                      />
++                    )
++                  })
++                : collapsed.rows.map((node) => {
++                    // Non-expanded group: flat preview of top-level rows (no tree).
++                    const sameGroupDrag = drag !== null && drag.accountKey === group.key
++                    const dragProps = {
++                      start: () => {
++                        sessionDropCommitted.current = false
++                        setDrag({ accountKey: group.key, sessionId: node.id, over: null })
++                      },
++                      active: sameGroupDrag,
++                      marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
++                      hover: (half: 'before' | 'after') => {
++                        setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
++                      },
++                      drop: (half: 'before' | 'after') => {
++                        if (drag === null) return
++                        commitSessionDrag(drag, { id: node.id, half })
++                      },
++                      end: () => {
++                        if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
++                        else setDrag(null)
++                        sessionDropCommitted.current = false
++                      },
++                    }
++                    return (
++                      <SessionNodeItem
++                        key={node.id}
++                        node={node}
++                        currentId={current}
++                        now={now}
++                        onOpen={open}
++                        onRename={onSessionRename}
++                        onFork={forkSession}
++                        onArchive={onSessionArchive}
++                        drag={dragProps}
++                        t={t}
++                      />
++                    )
++                  })}
+               {collapsed.hiddenCount > 0 && (
+                 <button
+                   type="button"
+diff --git a/packages/client/ui-workspace/src/client/tree.ts b/packages/client/ui-workspace/src/client/tree.ts
+index ec921306f9..bbf464fa63 100644
+--- a/packages/client/ui-workspace/src/client/tree.ts
++++ b/packages/client/ui-workspace/src/client/tree.ts
+@@ -43,6 +43,11 @@ export interface SessionNode {
+   updatedAt: number
+ }
+ 
++export interface SessionTreeNode extends SessionNode {
++  /** Human fork children nested under this row (recursive tree). */
++  readonly children: readonly SessionTreeNode[]
++}
++
+ /** Session order selected by the Workspace browser. */
+ export type SessionOrderBy = 'manual' | 'updated'
+ 
+@@ -63,6 +68,8 @@ export interface GroupNode {
+   containsCurrent: boolean
+   /** Visible session rows (empty while the group is folded). */
+   sessions: readonly SessionNode[]
++  /** Optional fork-tree rows (grouped tree mode); when present the renderer shows these instead of `sessions`. */
++  readonly forest?: readonly SessionTreeNode[]
+ }
+ 
+ /** One flat search row combining list metadata with an optional content match. */
+@@ -309,6 +316,85 @@ export function deriveGroups(
+   return groups
+ }
+ 
++/** Fork-tree derivation for the grouped browser view. Every visible human
++ * session with a visible human parent is nested under that parent instead of
++ * emitted flat. Subagent sessions stay hidden (activity rides the nearest
++ * visible human ancestor). Archived rows stay walkable ancestors so their
++ * living descendants re-parent to the closest visible human (no orphaning).
++ * Flat 'In one list' + search surfaces keep using deriveFlat/deriveSearchResults.
++ */
++export function deriveGroupForest(
++  list: SessionListState,
++  workspaces: readonly WorkspaceView[],
++  archivedSessionIds: readonly SessionId[],
++  pendingInteractions: SessionPendingInteractions,
++  view: TreeView,
++): GroupNode[] {
++  const archived = new Set(archivedSessionIds)
++  const expandedGroups = new Set(view.expandedGroups)
++  const descendants = indexSubagentDescendants(list.byId)
++  const currentGroup = list.current === undefined
++    ? undefined
++    : (workspaces.find(w => w.sessionIds.includes(list.current as SessionId))?.workspaceId as string | undefined)
++        ?? UNGROUPED_KEY
++  const groups: GroupNode[] = []
++  for (const g of groupByWorkspace(list, workspaces, archived, view.ungroupedOrder)) {
++    const expanded = expandedGroups.has(g.key)
++    // nearest visible human ancestor of any id (archived humans still chain)
++    const rootHuman: (id: SessionId) => SessionId | undefined = (startId) => {
++      let cur: SessionId | undefined = startId
++      for (let hops = 0; hops < 1024 && cur !== undefined; hops++) {
++        const rec: SessionSummary | undefined = list.byId[cur]
++        if (rec === undefined) return undefined
++        if (rec.origin === 'subagent') { cur = rec.parentId; continue }
++        if (!archived.has(rec.id)) return rec.id
++        cur = rec.parentId
++      }
++      return undefined
++    }
++    const humanParent = new Map<SessionId, SessionId>()
++    for (const s of g.sessions) {
++      if (s.origin === 'subagent' || s.parentId === undefined || s.parentId === s.id) continue
++      const anc = rootHuman(s.parentId)
++      if (anc !== undefined && anc !== s.id) humanParent.set(s.id, anc)
++    }
++    const childrenOf = new Map<SessionId, SessionId[]>()
++    for (const [child, parent] of humanParent) {
++      const arr = childrenOf.get(parent) ?? []; arr.push(child); childrenOf.set(parent, arr)
++    }
++    const byIdMap = new Map<SessionId, SessionSummary>()
++    for (const s of g.sessions) byIdMap.set(s.id, s)
++    const nodeOf = (s: SessionSummary): SessionTreeNode => ({
++      ...sessionNode(s, descendants, pendingInteractions),
++      children: [],
++    })
++    const build = (id: SessionId): SessionTreeNode | undefined => {
++      const s = byIdMap.get(id)
++      if (s === undefined) return undefined
++      const kids = (childrenOf.get(id) ?? [])
++        .map(build).filter((n): n is SessionTreeNode => n !== undefined)
++        .sort((a, b) => a.updatedAt === b.updatedAt ? (a.id < b.id ? -1 : 1) : (a.updatedAt < b.updatedAt ? 1 : -1))
++      return { ...nodeOf(s), children: kids }
++    }
++    const childIds = new Set(humanParent.keys())
++    const forest = g.sessions
++      .filter((row: SessionSummary) => row.origin !== 'subagent' && !childIds.has(row.id))
++      .map((row: SessionSummary) => build(row.id)).filter((n): n is SessionTreeNode => n !== undefined)
++    groups.push({
++      key: g.key,
++      workspaceId: g.workspaceId,
++      cwd: g.cwd,
++      createdAt: g.createdAt,
++      label: g.label,
++      sessionCount: g.sessions.length,
++      expanded,
++      containsCurrent: g.key === currentGroup,
++      sessions: expanded ? g.sessions.map(session => sessionNode(session, descendants, pendingInteractions)) : [],
++      forest: expanded ? forest : [],
++    })
++  }
++  return groups
++}
+ /**
+  * Derive the flat session list ("In one list" mode): every session — fork
+  * children included — as a top-level row, strictly newest-first. No grouping,
