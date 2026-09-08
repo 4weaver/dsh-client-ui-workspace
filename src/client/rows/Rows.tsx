@@ -375,7 +375,10 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
-export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, t }: {
+export function SessionNodeItem({
+  node, currentId, now, onOpen, onRename, onFork, onArchive,
+  drag, flat = false, children, treeCollapsed = false, onToggleTree, t,
+}: {
   node: SessionNode
   currentId: string | undefined
   now: number
@@ -390,6 +393,14 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
   drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
   flat?: boolean | undefined
+  /** Human fork children to render beneath this row (fork-tree view only). */
+  children?: readonly SessionTreeNode[] | undefined
+  /** Nesting level; 0 is a group root and 0 is the only draggable level. */
+  depth?: number | undefined
+  /** This row's own children are folded away. */
+  treeCollapsed?: boolean | undefined
+  /** Disclosure toggle owned by the tree renderer; absent on leaf rows. */
+  onToggleTree?: ((id: SessionNode['id']) => void) | undefined
   t: RowTranslate
 }) {
   const row = node
@@ -444,6 +455,24 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
           drag.drop(rowHalf(e))
         }}
     >
+      {/* Fork-tree disclosure, first child INSIDE the row so it rides the
+          row's own highlight pill and 16px slot grid. The official project
+          row sets the precedent (its chevron is a row child, not a wrapper).
+          Leaf rows keep an empty slot so titles align across depths. */}
+      {children !== undefined && children.length > 0 && (
+        <button
+          type="button"
+          className={clsx(css.slot, css.forkSlot)}
+          aria-expanded={!treeCollapsed}
+          aria-label={treeCollapsed ? t('sessions.twist.expand') : t('sessions.twist.collapse')}
+          onClick={(e) => { e.stopPropagation(); onToggleTree?.(node.id) }}
+        >
+          <IconTriangleRightFill14 className={clsx(css.arrow, !treeCollapsed && css.arrowOpen)} />
+        </button>
+      )}
+      {/* Leaf rows in a tree keep an empty slot so titles align across depths;
+          the hierarchy-free flat list omits it entirely (upstream contract). */}
+      {children !== undefined && children.length === 0 && <span className={css.slot} />}
       {/* Pending interaction and own or descendant activity outrank the
           finished-but-unviewed reminder, which returns after activity stops
           and is cleared by opening the session. */}
@@ -501,41 +530,40 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
 }
 
 /**
- * One expandable workspace-browser row in the optional fork-tree view.
- * The parent row is wrapped with a caret only when it has children; recursing
- * under `.nodeChildren` nests human fork / subagent-forks depth-first. Root rows
- * receive the browser's drag props via `drag`; deeper rows render non-draggable.
+ * One top-level session row plus its fork subtree. Roots carry the drag
+ * wiring; nested children are indented by one `--fork-indent` unit per depth
+ * and are never draggable (drag arithmetic stays on the group's flat rows).
+ * @param props.node - derived tree node (children already nested).
+ * @param props.depth - nesting level; 0 is a group root.
+ * @param props.collapsed - the row's own subtree is folded away.
+ * @param props.onToggle - flip one row's subtree.
+ * @param props.drag - drag wiring, passed only at depth 0.
+ * @returns the row subtree fragment.
  */
-export function SessionTreeNodeItem({ node, now, currentId, collapsed, onToggle, onOpen, onRename, onFork, onArchive, t, drag }: {
+export function SessionTreeNodeItem({
+  node, currentId, now, onOpen, onRename, onFork, onArchive, depth = 0, collapsed = false, onToggle, drag, t,
+}: {
   node: SessionTreeNode
-  now: number
   currentId: string | undefined
-  collapsed: boolean
-  onToggle: (id: SessionTreeNode['id']) => void
-  onOpen: (id: SessionTreeNode['id']) => void
-  onRename: (id: SessionTreeNode['id'], title: string) => void
-  onFork: (id: SessionTreeNode['id']) => void
-  onArchive: (id: SessionTreeNode['id']) => void
+  now: number
+  onOpen: (id: SessionNode['id']) => void
+  onRename: (id: SessionNode['id'], currentTitle: string) => void
+  onFork: (id: SessionNode['id']) => void
+  onArchive: (id: SessionNode['id']) => void
+  depth?: number | undefined
+  collapsed?: boolean | undefined
+  onToggle: (id: SessionNode['id']) => void
+  /** Present only for depth-0 roots; nested rows never initiate a drag. */
+  drag?: RowDragProps | undefined
   t: RowTranslate
-  drag?: { marker: 'before' | 'after' | null; start(): void; active: boolean; hover(h: 'before' | 'after'): void; drop(h: 'before' | 'after'): void; end(): void } | undefined
 }) {
-  const hasKids = node.children.length > 0
+  const hasChildren = node.children.length > 0
+  // Indentation lives on a wrapper span, never on the row itself: the row
+  // must stay a full-width flex child of the list (a wrapper div would
+  // shrink it to content width and break the highlight pill).
   return (
-    <div className={css.sessionTreeBlock}>
-      <div className={css.treeRow}>
-        {hasKids ? (
-          <button
-            type="button"
-            aria-label={collapsed ? 'Expand' : 'Collapse'}
-            aria-expanded={!collapsed}
-            className={clsx(css.nodeCaret, !collapsed && css.nodeCaretOpen)}
-            onClick={(e) => { e.stopPropagation(); onToggle(node.id) }}
-          >
-            <IconTriangleRightFill14 />
-          </button>
-        ) : (
-          <span className={css.nodeCaretSpacer} />
-        )}
+    <>
+      <span className={depth > 0 ? css.forkChild : undefined}>
         <SessionNodeItem
           node={node}
           currentId={currentId}
@@ -544,29 +572,29 @@ export function SessionTreeNodeItem({ node, now, currentId, collapsed, onToggle,
           onRename={onRename}
           onFork={onFork}
           onArchive={onArchive}
-          drag={drag}
+          children={node.children}
+          depth={depth}
+          treeCollapsed={collapsed}
+          onToggleTree={hasChildren ? onToggle : undefined}
+          drag={depth === 0 ? drag : undefined}
           t={t}
         />
-      </div>
-      {!collapsed && node.children.length > 0 && (
-        <div className={css.nodeChildren}>
-          {node.children.map(child => (
-            <SessionTreeNodeItem
-              key={child.id}
-              node={child}
-              now={now}
-              currentId={currentId}
-              collapsed={false}
-              onToggle={onToggle}
-              onOpen={onOpen}
-              onRename={onRename}
-              onFork={onFork}
-              onArchive={onArchive}
-              t={t}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+      </span>
+      {hasChildren && !collapsed && node.children.map(child => (
+        <SessionTreeNodeItem
+          key={child.id}
+          node={child}
+          currentId={currentId}
+          now={now}
+          onOpen={onOpen}
+          onRename={onRename}
+          onFork={onFork}
+          onArchive={onArchive}
+          depth={depth + 1}
+          onToggle={onToggle}
+          t={t}
+        />
+      ))}
+    </>
   )
 }

@@ -453,7 +453,10 @@ describe('WorkspaceBrowser', () => {
     }
   })
 
-  it('renders a fork child as a top-level row without a session twist', () => {
+  // Fork-tree fork: upstream rc.1 flattens fork children to top-level rows;
+  // this build nests them under their human parent behind an always-visible
+  // chevron that lives INSIDE the row (no wrapper element).
+  it('nests a fork child under its parent behind the parent row disclosure', () => {
     const parent = summary('parent-s', 2)
     const child = { ...summary('child-s', 1), parentId: parent.id }
     mount({
@@ -461,9 +464,51 @@ describe('WorkspaceBrowser', () => {
       useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
     })
     fireEvent.click(screen.getByText('alpha'))
-    expect(screen.getByText('child-s')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /展开|收起/ })).toBeNull()
-    expect(screen.getByText('child-s').closest('[role="treeitem"]')?.getAttribute('draggable')).toBe('true')
+    // the parent exposes the disclosure and starts expanded
+    const twist = screen.getByRole('button', { name: '收起分支会话' })
+    expect(twist.getAttribute('aria-expanded')).toBe('true')
+    // the chevron is a child of the parent's own row element, not a wrapper
+    const parentRow = screen.getByText('parent-s').closest('[role="treeitem"]')
+    expect(parentRow?.contains(twist)).toBe(true)
+    // the child row is nested UNDER the parent row, and is not draggable
+    const childRow = screen.getAllByText('child-s')
+      .map(node => node.closest('[role="treeitem"]'))
+      .find(row => row !== null)
+    expect(parentRow !== null && childRow != null
+      && (parentRow.compareDocumentPosition(childRow) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
+    expect(childRow?.getAttribute('draggable')).toBe('false')
+    expect(childRow?.querySelector('[aria-label="收起分支会话"]')).toBeNull()
+    // the depth-0 parent stays draggable
+    expect(parentRow?.getAttribute('draggable')).toBe('true')
+    // collapsing the parent hides the child row (its portaled hover copy may stay)
+    fireEvent.click(twist)
+    expect(screen.queryAllByText('child-s').filter(node => node.closest('[role="treeitem"]') !== null)).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '展开分支会话' }).getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('budgets the folded preview by total rows so fork children show before Show more', () => {
+    // root + 5 children = 6 rows under a 5-row budget: the root and its four
+    // newest children render (depth-first), the fifth child stays hidden.
+    const parent = summary('parent-s', 7)
+    const kids = Array.from({ length: 5 }, (_, index) => ({
+      ...summary(`kid-${index + 1}`, 6 - index),
+      parentId: parent.id,
+    }))
+    mount({
+      useSessions: hook(sessionState([parent, ...kids])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', [parent.id, ...kids.map(k => k.id)])])),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    // Session rows only: the workspace header row is also a treeitem, and the
+    // row's hover card is portaled out of the list.
+    const rowTitles = () => screen.getAllByRole('treeitem')
+      .filter(row => row.className.includes('sessionRow'))
+      .map(row => row.querySelector('span[class*="title"]')?.textContent)
+    expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4'])
+    expect(screen.getByRole('button', { name: '展开其余 1 个会话' })).toBeTruthy()
+    // Expanding reveals the withheld child in place (still nested, in order).
+    fireEvent.click(screen.getByRole('button', { name: '展开其余 1 个会话' }))
+    expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4', 'kid-5'])
   })
 
   it('expands the target group before starting a session from its ＋', () => {

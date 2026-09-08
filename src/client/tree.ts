@@ -43,11 +43,6 @@ export interface SessionNode {
   updatedAt: number
 }
 
-export interface SessionTreeNode extends SessionNode {
-  /** Human fork children nested under this row (recursive tree). */
-  readonly children: readonly SessionTreeNode[]
-}
-
 /** Session order selected by the Workspace browser. */
 export type SessionOrderBy = 'manual' | 'updated'
 
@@ -68,8 +63,22 @@ export interface GroupNode {
   containsCurrent: boolean
   /** Visible session rows (empty while the group is folded). */
   sessions: readonly SessionNode[]
-  /** Optional fork-tree rows (grouped tree mode); when present the renderer shows these instead of `sessions`. */
-  readonly forest?: readonly SessionTreeNode[]
+  /**
+   * Fork-tree rows for this group, gated on {@link GroupNode.expanded}: a
+   * folded group shows no sessions at all, so its forest stays absent.
+   * Roots are the group's top-level rows; human fork children nest below
+   * their nearest visible human ancestor.
+   */
+  forest?: readonly SessionTreeNode[]
+}
+
+/**
+ * One session row plus its already-nested human fork children. Produced by
+ * {@link deriveGroupForest} for rendering only; `GroupNode.sessions` stays
+ * the authoritative flat order for drag arithmetic and overflow counting.
+ */
+export interface SessionTreeNode extends SessionNode {
+  readonly children: readonly SessionTreeNode[]
 }
 
 /** One flat search row combining list metadata with an optional content match. */
@@ -316,12 +325,92 @@ export function deriveGroups(
   return groups
 }
 
-/** Fork-tree derivation for the grouped browser view. Every visible human
- * session with a visible human parent is nested under that parent instead of
- * emitted flat. Subagent sessions stay hidden (activity rides the nearest
- * visible human ancestor). Archived rows stay walkable ancestors so their
- * living descendants re-parent to the closest visible human (no orphaning).
- * Flat 'In one list' + search surfaces keep using deriveFlat/deriveSearchResults.
+/** Bound the parent walk so a corrupted lineage can never spin the renderer. */
+const ROOT_WALK_LIMIT = 1024
+
+/**
+ * Nearest ancestor a fork child may hang under: walk `parentId` up, skipping
+ * subagent-origin hops (they are never rows), and stop at the first ancestor
+ * outside the archive set. Archived humans stay walkable so a living descendant
+ * re-parents to their own ancestor instead of orphaning; a broken chain
+ * (missing id, self-parent, cycle) or an exhausted hop budget yields no visible
+ * parent, which makes the session a forest root.
+ * @param byId - session summaries by id (lineage authority).
+ * @param archived - registry-global archive set.
+ * @param id - the session whose visible ancestor is wanted.
+ * @returns the ancestor id, or undefined when the session is its own root.
+ */
+function rootHuman(
+  byId: SessionListState['byId'],
+  archived: ReadonlySet<SessionId>,
+  id: SessionId,
+): SessionId | undefined {
+  let current = byId[id]?.parentId as SessionId | undefined
+  for (let hops = 0; current !== undefined && hops < ROOT_WALK_LIMIT; hops += 1) {
+    const summary = byId[current]
+    if (summary === undefined) return undefined
+    if (summary.origin === 'subagent') {
+      current = summary.parentId as SessionId | undefined
+      continue
+    }
+    if (!archived.has(summary.id)) return summary.id
+    current = summary.parentId as SessionId | undefined
+  }
+  return undefined
+}
+
+/** Recency comparator over raw summaries: newest first, id ascending as the tie-break. */
+function recencyThenId(a: SessionSummary, b: SessionSummary): number {
+  if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt
+  return a.id < b.id ? -1 : 1
+}
+
+/** Nest one group's visible rows: roots in list order, children newest-first under their visible human ancestor. */
+function forestOf(
+  sessions: readonly SessionNode[],
+  byId: SessionListState['byId'],
+  archived: ReadonlySet<SessionId>,
+  descendants: ReadonlyMap<SessionId, SubagentDescendantSummary>,
+  pendingInteractions: SessionPendingInteractions,
+): readonly SessionTreeNode[] {
+  const kids = new Map<SessionId, SessionSummary[]>()
+  const roots: SessionSummary[] = []
+  for (const node of sessions) {
+    const summary = byId[node.id]
+    if (summary === undefined) continue
+    const parent = rootHuman(byId, archived, summary.id)
+    if (parent === undefined) {
+      roots.push(summary)
+      continue
+    }
+    const bucket = kids.get(parent)
+    if (bucket === undefined) kids.set(parent, [summary])
+    else bucket.push(summary)
+  }
+  for (const bucket of kids.values()) bucket.sort(recencyThenId)
+  const build = (summary: SessionSummary): SessionTreeNode => ({
+    ...sessionNode(summary, descendants, pendingInteractions),
+    children: (kids.get(summary.id) ?? []).map(build),
+  })
+  return roots.map(build)
+}
+
+/**
+ * Derive the fork-tree forest for every group: human fork children nest under
+ * their nearest visible human ancestor, subagent-origin sessions never appear as
+ * rows (their activity still surfaces as `runningSubagentCount` on the nearest
+ * human ancestor).
+ *
+ * Rendering-only projection: `GroupNode.sessions` stays the authoritative flat
+ * order, and `forest` is gated on the group's own `expanded` flag because a
+ * folded group shows no sessions. `deriveFlat`, `deriveGroups` and
+ * {@link deriveSearchResults} are untouched.
+ * @param list - sessions list snapshot (`byId` supplies lineage).
+ * @param workspaces - real workspaces in stable Host order.
+ * @param archivedSessionIds - registry-global archive set.
+ * @param pendingInteractions - pending UI interactions by Session.
+ * @param view - local expansion arrays (decides which groups carry a forest).
+ * @returns group sections in render order, with `forest` on expanded groups only.
  */
 export function deriveGroupForest(
   list: SessionListState,
@@ -331,70 +420,14 @@ export function deriveGroupForest(
   view: TreeView,
 ): GroupNode[] {
   const archived = new Set(archivedSessionIds)
-  const expandedGroups = new Set(view.expandedGroups)
-  const descendants = indexSubagentDescendants(list.byId)
-  const currentGroup = list.current === undefined
-    ? undefined
-    : (workspaces.find(w => w.sessionIds.includes(list.current as SessionId))?.workspaceId as string | undefined)
-        ?? UNGROUPED_KEY
-  const groups: GroupNode[] = []
-  for (const g of groupByWorkspace(list, workspaces, archived, view.ungroupedOrder)) {
-    const expanded = expandedGroups.has(g.key)
-    // nearest visible human ancestor of any id (archived humans still chain)
-    const rootHuman: (id: SessionId) => SessionId | undefined = (startId) => {
-      let cur: SessionId | undefined = startId
-      for (let hops = 0; hops < 1024 && cur !== undefined; hops++) {
-        const rec: SessionSummary | undefined = list.byId[cur]
-        if (rec === undefined) return undefined
-        if (rec.origin === 'subagent') { cur = rec.parentId; continue }
-        if (!archived.has(rec.id)) return rec.id
-        cur = rec.parentId
-      }
-      return undefined
-    }
-    const humanParent = new Map<SessionId, SessionId>()
-    for (const s of g.sessions) {
-      if (s.origin === 'subagent' || s.parentId === undefined || s.parentId === s.id) continue
-      const anc = rootHuman(s.parentId)
-      if (anc !== undefined && anc !== s.id) humanParent.set(s.id, anc)
-    }
-    const childrenOf = new Map<SessionId, SessionId[]>()
-    for (const [child, parent] of humanParent) {
-      const arr = childrenOf.get(parent) ?? []; arr.push(child); childrenOf.set(parent, arr)
-    }
-    const byIdMap = new Map<SessionId, SessionSummary>()
-    for (const s of g.sessions) byIdMap.set(s.id, s)
-    const nodeOf = (s: SessionSummary): SessionTreeNode => ({
-      ...sessionNode(s, descendants, pendingInteractions),
-      children: [],
-    })
-    const build = (id: SessionId): SessionTreeNode | undefined => {
-      const s = byIdMap.get(id)
-      if (s === undefined) return undefined
-      const kids = (childrenOf.get(id) ?? [])
-        .map(build).filter((n): n is SessionTreeNode => n !== undefined)
-        .sort((a, b) => a.updatedAt === b.updatedAt ? (a.id < b.id ? -1 : 1) : (a.updatedAt < b.updatedAt ? 1 : -1))
-      return { ...nodeOf(s), children: kids }
-    }
-    const childIds = new Set(humanParent.keys())
-    const forest = g.sessions
-      .filter((row: SessionSummary) => row.origin !== 'subagent' && !childIds.has(row.id))
-      .map((row: SessionSummary) => build(row.id)).filter((n): n is SessionTreeNode => n !== undefined)
-    groups.push({
-      key: g.key,
-      workspaceId: g.workspaceId,
-      cwd: g.cwd,
-      createdAt: g.createdAt,
-      label: g.label,
-      sessionCount: g.sessions.length,
-      expanded,
-      containsCurrent: g.key === currentGroup,
-      sessions: expanded ? g.sessions.map(session => sessionNode(session, descendants, pendingInteractions)) : [],
-      forest: expanded ? forest : [],
-    })
-  }
-  return groups
+  const byId = list.byId
+  const descendants = indexSubagentDescendants(byId)
+  return deriveGroups(list, workspaces, archivedSessionIds, pendingInteractions, view).map(group =>
+    group.expanded
+      ? { ...group, forest: forestOf(group.sessions, byId, archived, descendants, pendingInteractions) }
+      : group)
 }
+
 /**
  * Derive the flat session list ("In one list" mode): every session — fork
  * children included — as a top-level row, strictly newest-first. No grouping,

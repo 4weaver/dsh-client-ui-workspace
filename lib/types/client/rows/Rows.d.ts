@@ -82,7 +82,7 @@ export declare function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
-export declare function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat, t }: {
+export declare function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat, children, treeCollapsed, onToggleTree, t, }: {
     node: SessionNode;
     currentId: string | undefined;
     now: number;
@@ -97,33 +97,41 @@ export declare function SessionNodeItem({ node, currentId, now, onOpen, onRename
     drag?: RowDragProps | undefined;
     /** The row is rendered without a parent Workspace header. */
     flat?: boolean | undefined;
+    /** Human fork children to render beneath this row (fork-tree view only). */
+    children?: readonly SessionTreeNode[] | undefined;
+    /** Nesting level; 0 is a group root and 0 is the only draggable level. */
+    depth?: number | undefined;
+    /** This row's own children are folded away. */
+    treeCollapsed?: boolean | undefined;
+    /** Disclosure toggle owned by the tree renderer; absent on leaf rows. */
+    onToggleTree?: ((id: SessionNode['id']) => void) | undefined;
     t: RowTranslate;
 }): import("react").JSX.Element;
 /**
- * One expandable workspace-browser row in the optional fork-tree view.
- * The parent row is wrapped with a caret only when it has children; recursing
- * under `.nodeChildren` nests human fork / subagent-forks depth-first. Root rows
- * receive the browser's drag props via `drag`; deeper rows render non-draggable.
+ * One top-level session row plus its fork subtree. Roots carry the drag
+ * wiring; nested children are indented by one `--fork-indent` unit per depth
+ * and are never draggable (drag arithmetic stays on the group's flat rows).
+ * @param props.node - derived tree node (children already nested).
+ * @param props.depth - nesting level; 0 is a group root.
+ * @param props.collapsed - the row's own subtree is folded away.
+ * @param props.onToggle - flip one row's subtree.
+ * @param props.drag - drag wiring, passed only at depth 0.
+ * @returns the row subtree fragment.
  */
-export declare function SessionTreeNodeItem({ node, now, currentId, collapsed, onToggle, onOpen, onRename, onFork, onArchive, t, drag }: {
+export declare function SessionTreeNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, depth, collapsed, onToggle, drag, t, }: {
     node: SessionTreeNode;
-    now: number;
     currentId: string | undefined;
-    collapsed: boolean;
-    onToggle: (id: SessionTreeNode['id']) => void;
-    onOpen: (id: SessionTreeNode['id']) => void;
-    onRename: (id: SessionTreeNode['id'], title: string) => void;
-    onFork: (id: SessionTreeNode['id']) => void;
-    onArchive: (id: SessionTreeNode['id']) => void;
+    now: number;
+    onOpen: (id: SessionNode['id']) => void;
+    onRename: (id: SessionNode['id'], currentTitle: string) => void;
+    onFork: (id: SessionNode['id']) => void;
+    onArchive: (id: SessionNode['id']) => void;
+    depth?: number | undefined;
+    collapsed?: boolean | undefined;
+    onToggle: (id: SessionNode['id']) => void;
+    /** Present only for depth-0 roots; nested rows never initiate a drag. */
+    drag?: RowDragProps | undefined;
     t: RowTranslate;
-    drag?: {
-        marker: 'before' | 'after' | null;
-        start(): void;
-        active: boolean;
-        hover(h: 'before' | 'after'): void;
-        drop(h: 'before' | 'after'): void;
-        end(): void;
-    } | undefined;
 }): import("react").JSX.Element;
 export {};
 //# sourceMappingURL=Rows.d.ts.map

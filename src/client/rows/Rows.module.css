@@ -359,54 +359,11 @@
   color: var(--dsw-alias-label-caption);
 }
 
-/* Fork-tree view: rows indent under a guide-line as human fork children nest. */
-.sessionTreeBlock {
-  width: 100%;
-  min-width: 0;
-}
+/* Fork tree: one indent unit; chevron rides the official 16px .slot inside the row. */
+.forkSlot { color: var(--dsw-alias-label-caption); cursor: pointer; }
+/* Pure indentation, no rail (user decision: rail later if wanted). */
+.forkChild { padding-left: var(--fork-indent, 16px); }
 
-.treeRow {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 0;
-  width: 100%;
-  min-width: 0;
-}
-
-.nodeCaret {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  margin: 0;
-  padding: 7px 2px 0 0;
-  flex: none;
-  width: 18px;
-  height: 100%;
-  display: inline-flex;
-  align-items: flex-start;
-  justify-content: center;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-
-.nodeCaretSpacer {
-  flex: none;
-  width: 18px;
-}
-
-.nodeCaret:hover { color: var(--dsw-alias-label-primary); }
-
-.nodeCaret svg { width: 9px; height: 9px; transition: transform 120ms var(--ds-ease-in-out); }
-.nodeCaretOpen svg { transform: rotate(90deg); }
-
-.nodeChildren {
-  display: flex;
-  flex-direction: column;
-  margin: 0 0 0 18px;
-  padding-left: 8px;
-  border-left: 1px solid var(--dsw-alias-border-l2, var(--dsw-alias-border-l, rgba(128,128,128,.25)));
-}
 @media (prefers-reduced-motion: reduce) {
   .sessionRow,
   .arrow {

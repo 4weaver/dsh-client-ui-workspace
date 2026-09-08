@@ -55,6 +55,45 @@ function collapsedSessionRows(sessions: readonly SessionNode[]): {
   return { rows, hiddenCount: sessions.length - rows.length }
 }
 
+/** Total rendered rows in a collapsed preview = roots + every visible descendant. */
+function countForestRows(nodes: readonly SessionTreeNode[]): number {
+  let total = 0
+  for (const node of nodes) total += 1 + countForestRows(node.children)
+  return total
+}
+
+/**
+ * Fold a forest to the five-visible-row preview budget, counted over TOTAL rows
+ * (root + descendants, depth-first render order) exactly like
+ * {@link collapsedSessionRows} counts flat rows. A truncated row rides along as
+ * a collapsed subtree so its caret never claims unrendered children, and `blank`
+ * rows never consume budget. `hiddenCount` is the true row difference.
+ */
+function collapsedForestRows(forest: readonly SessionTreeNode[]): {
+  rows: readonly SessionTreeNode[]
+  hiddenCount: number
+} {
+  let budget = COLLAPSED_SESSION_LIMIT
+  const walk = (nodes: readonly SessionTreeNode[]): SessionTreeNode[] => {
+    const kept: SessionTreeNode[] = []
+    for (const node of nodes) {
+      if (!node.blank) {
+        if (budget === 0) continue
+        budget -= 1
+      }
+      // Out of ordinary budget with children left: keep the row but drop its
+      // subtree whole, so the caret state matches what is in the DOM.
+      const children = budget === 0 ? [] : walk(node.children)
+      kept.push(children.length === node.children.length
+        ? node
+        : { ...node, children })
+    }
+    return kept
+  }
+  const rows = walk(forest)
+  return { rows, hiddenCount: countForestRows(forest) - countForestRows(rows) }
+}
+
 /** Keep controlled input and RPC payload inside the session.search wire contract. */
 function sanitizeSearchQuery(value: string): string {
   const withoutNul = value.replaceAll('\0', '')
@@ -276,11 +315,13 @@ function SessionTree({
   const pendingInteractions = useSessionPendingInteraction(s => s)
   const current = list.current
   const [expandedSessionGroups, setExpandedSessionGroups] = useState<string[]>([])
+  // Fork rows the user folded individually (independent of the group's
+  // Show-N-more budget); unknown ids are harmless and are retained for the
+  // life of the tree, mirroring the group-key expand-all array.
+  const [collapsedTreeRows, setCollapsedTreeRows] = useState<string[]>([])
   // Transient drag marker state; the selected mode owns the resulting order.
   const [drag, setDrag] = useState<DragState | null>(null)
   const sessionDropCommitted = useRef(false)
-  // Per-browser collapse of a fork-tree root (children stay visible by default).
-  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set())
   const [workspaceDrag, setWorkspaceDrag] = useState<WorkspaceDragState | null>(null)
   const workspaceDropCommitted = useRef(false)
   const previousOrderBy = useRef(orderBy)
@@ -349,23 +390,21 @@ function SessionTree({
     }),
     [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount],
   )
-  // Fork-tree view (grouped mode): parallel per-group forest used only for
-  // rendering top-level rows recursively. `groups`/.sessions stays authoritative
-  // for drag arithmetic, overflow counting and flat render.
-  const forests = useMemo(
-    () => {
-      const map = new Map<string, readonly SessionTreeNode[]>()
-      for (const gg of deriveGroupForest(list, orderedWorkspaces, archivedSessionIds, pendingInteractions, {
-        expandedGroups,
-        ...(sessionOrderByAccount[UNGROUPED_KEY] === undefined ? {} : { ungroupedOrder: sessionOrderByAccount[UNGROUPED_KEY] }),
-      })) {
-        map.set(gg.key, gg.forest ?? [])
-      }
-      return map
-    },
-    [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount],
-  )
-
+  // Fork-tree forests, keyed by group. Rendering-only: `groups[].sessions` stays
+  // authoritative for drag arithmetic and the overflow count.
+  const forests = useMemo(() => {
+    const map = new Map<string, readonly SessionTreeNode[]>()
+    const derived = deriveGroupForest(list, orderedWorkspaces, archivedSessionIds, pendingInteractions, {
+      expandedGroups,
+      ...(sessionOrderByAccount[UNGROUPED_KEY] === undefined
+        ? {}
+        : { ungroupedOrder: sessionOrderByAccount[UNGROUPED_KEY] }),
+    })
+    for (const group of derived) {
+      if (group.forest !== undefined) map.set(group.key, group.forest)
+    }
+    return map
+  }, [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount])
   const now = Date.now()
   const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
     if (sessionDropCommitted.current) return
@@ -457,8 +496,35 @@ function SessionTree({
         )}
         {groups.map((group) => {
           const workspaceId = group.workspaceId
+          // Overflow arithmetic stays on the flat `group.sessions` account.
           const collapsed = collapsedSessionRows(group.sessions)
           const sessionsExpanded = expandedSessionGroups.includes(group.key)
+          const forest = forests.get(group.key) ?? []
+          const preview = collapsedForestRows(forest)
+          const forestRows = sessionsExpanded ? forest : preview.rows
+          // Rows whose preview subtree was dropped render folded, so the caret
+          // never claims children that are absent from the DOM. User folds are
+          // additive on top of that.
+          const collapsedTreeIds = new Set<string>()
+          if (!sessionsExpanded) {
+            const collect = (nodes: readonly SessionTreeNode[], kept: readonly SessionTreeNode[]): void => {
+              for (let i = 0; i < nodes.length; i += 1) {
+                const node = nodes[i]
+                const keptNode = kept[i]
+                if (node === undefined || keptNode === undefined) continue
+                // Fold only rows whose children ALL vanished: a row that kept
+                // some children stays open and the rest ride the overflow button.
+                if (node.children.length > 0 && keptNode.children.length === 0) {
+                  collapsedTreeIds.add(node.id as string)
+                }
+                collect(node.children, keptNode.children)
+              }
+            }
+            collect(forest, preview.rows)
+          }
+          const onToggleTree = (id: SessionNode['id']) => {
+            setCollapsedTreeRows(keys => toggled(keys, id as string))
+          }
           const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
             ? workspaceDrag.over.half
             : null
@@ -544,88 +610,54 @@ function SessionTree({
                     },
                   }}
               />
-              {sessionsExpanded
-                ? (forests.get(group.key) ?? []).map((root) => {
-                    // Root (depth-0) rows get drag; deeper rows recurse non-draggable.
-                    const sameRootDrag = drag !== null && drag.accountKey === group.key
-                    const rootDragProps = {
-                      start: () => {
-                        sessionDropCommitted.current = false
-                        setDrag({ accountKey: group.key, sessionId: root.id, over: null })
-                      },
-                      active: sameRootDrag,
-                      marker: sameRootDrag && drag.over?.id === root.id ? drag.over.half : null,
-                      hover: (half: 'before' | 'after') => {
-                      /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
-                        setDrag(d => (d === null ? d : { ...d, over: { id: root.id, half } }))
-                      },
-                      drop: (half: 'before' | 'after') => {
-                      /* v8 ignore next -- narrowing guard */
-                        if (drag === null) return
-                        commitSessionDrag(drag, { id: root.id, half })
-                      },
-                      end: () => {
-                        if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
-                        else setDrag(null)
-                        sessionDropCommitted.current = false
-                      },
-                    }
-                    return (
-                      <SessionTreeNodeItem
-                        key={root.id}
-                        node={root}
-                        now={now}
-                        currentId={current}
-                        collapsed={collapsedNodes.has(root.id)}
-                        onToggle={(id) => setCollapsedNodes(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
-                        onOpen={open}
-                        onRename={onSessionRename}
-                        onFork={forkSession}
-                        onArchive={onSessionArchive}
-                        t={t}
-                        drag={rootDragProps}
-                      />
-                    )
-                  })
-                : collapsed.rows.map((node) => {
-                    // Non-expanded group: flat preview of top-level rows (no tree).
-                    const sameGroupDrag = drag !== null && drag.accountKey === group.key
-                    const dragProps = {
-                      start: () => {
-                        sessionDropCommitted.current = false
-                        setDrag({ accountKey: group.key, sessionId: node.id, over: null })
-                      },
-                      active: sameGroupDrag,
-                      marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
-                      hover: (half: 'before' | 'after') => {
-                        setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
-                      },
-                      drop: (half: 'before' | 'after') => {
-                        if (drag === null) return
-                        commitSessionDrag(drag, { id: node.id, half })
-                      },
-                      end: () => {
-                        if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
-                        else setDrag(null)
-                        sessionDropCommitted.current = false
-                      },
-                    }
-                    return (
-                      <SessionNodeItem
-                        key={node.id}
-                        node={node}
-                        currentId={current}
-                        now={now}
-                        onOpen={open}
-                        onRename={onSessionRename}
-                        onFork={forkSession}
-                        onArchive={onSessionArchive}
-                        drag={dragProps}
-                        t={t}
-                      />
-                    )
-                  })}
-              {collapsed.hiddenCount > 0 && (
+              {/* Fork-tree render: expanded groups show the whole forest; folded
+                  groups show a budgeted preview of total rows. Overflow takes the
+                  count from `collapsed.rows` (the pre-truncation projection), so
+                  the two always agree. Drag is wired on depth-0 roots only. */}
+              {forestRows.map((node) => {
+              // Session drag never leaves its group. Ungrouped writes only the
+              // browser-local account; real Workspaces may also write Host order.
+                const sameGroupDrag = drag !== null && drag.accountKey === group.key
+                const dragProps = {
+                  start: () => {
+                    sessionDropCommitted.current = false
+                    setDrag({ accountKey: group.key, sessionId: node.id, over: null })
+                  },
+                  active: sameGroupDrag,
+                  marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
+                  hover: (half: 'before' | 'after') => {
+                  /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
+                    setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
+                  },
+                  drop: (half: 'before' | 'after') => {
+                  /* v8 ignore next -- narrowing guard: Rows gates drop on `active`, which is false while the drag state is null. */
+                    if (drag === null) return
+                    commitSessionDrag(drag, { id: node.id, half })
+                  },
+                  end: () => {
+                    if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
+                    else setDrag(null)
+                    sessionDropCommitted.current = false
+                  },
+                }
+                return (
+                  <SessionTreeNodeItem
+                    key={node.id}
+                    node={node}
+                    currentId={current}
+                    now={now}
+                    onOpen={open}
+                    onRename={onSessionRename}
+                    onFork={forkSession}
+                    onArchive={onSessionArchive}
+                    collapsed={collapsedTreeIds.has(node.id) || collapsedTreeRows.includes(node.id as string)}
+                    onToggle={onToggleTree}
+                    drag={dragProps}
+                    t={t}
+                  />
+                )
+              })}
+              {(sessionsExpanded ? preview.hiddenCount : collapsed.hiddenCount) > 0 && (
                 <button
                   type="button"
                   className={css.sessionOverflowButton}
@@ -634,7 +666,7 @@ function SessionTree({
                 >
                   {sessionsExpanded
                     ? t('sessions.collapse')
-                    : t('sessions.expand', { n: collapsed.hiddenCount })}
+                    : t('sessions.expand', { n: preview.hiddenCount })}
                 </button>
               )}
             </div>

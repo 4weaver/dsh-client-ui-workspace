@@ -30,10 +30,6 @@ export interface SessionNode {
     hasActiveSchedule: boolean;
     updatedAt: number;
 }
-export interface SessionTreeNode extends SessionNode {
-    /** Human fork children nested under this row (recursive tree). */
-    readonly children: readonly SessionTreeNode[];
-}
 /** Session order selected by the Workspace browser. */
 export type SessionOrderBy = 'manual' | 'updated';
 /** One workspace group section: header row facts + visible top-level session rows. */
@@ -53,8 +49,21 @@ export interface GroupNode {
     containsCurrent: boolean;
     /** Visible session rows (empty while the group is folded). */
     sessions: readonly SessionNode[];
-    /** Optional fork-tree rows (grouped tree mode); when present the renderer shows these instead of `sessions`. */
-    readonly forest?: readonly SessionTreeNode[];
+    /**
+     * Fork-tree rows for this group, gated on {@link GroupNode.expanded}: a
+     * folded group shows no sessions at all, so its forest stays absent.
+     * Roots are the group's top-level rows; human fork children nest below
+     * their nearest visible human ancestor.
+     */
+    forest?: readonly SessionTreeNode[];
+}
+/**
+ * One session row plus its already-nested human fork children. Produced by
+ * {@link deriveGroupForest} for rendering only; `GroupNode.sessions` stays
+ * the authoritative flat order for drag arithmetic and overflow counting.
+ */
+export interface SessionTreeNode extends SessionNode {
+    readonly children: readonly SessionTreeNode[];
 }
 /** One flat search row combining list metadata with an optional content match. */
 export interface SearchResultNode {
@@ -106,12 +115,22 @@ export declare function workspaceLabel(cwd: string | undefined): string;
  * @returns group sections in render order.
  */
 export declare function deriveGroups(list: SessionListState, workspaces: readonly WorkspaceView[], archivedSessionIds: readonly SessionId[], pendingInteractions: SessionPendingInteractions, view: TreeView): GroupNode[];
-/** Fork-tree derivation for the grouped browser view. Every visible human
- * session with a visible human parent is nested under that parent instead of
- * emitted flat. Subagent sessions stay hidden (activity rides the nearest
- * visible human ancestor). Archived rows stay walkable ancestors so their
- * living descendants re-parent to the closest visible human (no orphaning).
- * Flat 'In one list' + search surfaces keep using deriveFlat/deriveSearchResults.
+/**
+ * Derive the fork-tree forest for every group: human fork children nest under
+ * their nearest visible human ancestor, subagent-origin sessions never appear as
+ * rows (their activity still surfaces as `runningSubagentCount` on the nearest
+ * human ancestor).
+ *
+ * Rendering-only projection: `GroupNode.sessions` stays the authoritative flat
+ * order, and `forest` is gated on the group's own `expanded` flag because a
+ * folded group shows no sessions. `deriveFlat`, `deriveGroups` and
+ * {@link deriveSearchResults} are untouched.
+ * @param list - sessions list snapshot (`byId` supplies lineage).
+ * @param workspaces - real workspaces in stable Host order.
+ * @param archivedSessionIds - registry-global archive set.
+ * @param pendingInteractions - pending UI interactions by Session.
+ * @param view - local expansion arrays (decides which groups carry a forest).
+ * @returns group sections in render order, with `forest` on expanded groups only.
  */
 export declare function deriveGroupForest(list: SessionListState, workspaces: readonly WorkspaceView[], archivedSessionIds: readonly SessionId[], pendingInteractions: SessionPendingInteractions, view: TreeView): GroupNode[];
 /**

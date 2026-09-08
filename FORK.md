@@ -12,27 +12,36 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
 
 ## What changed
 
-`patches/0001-fork-tree-view.patch` — 4 files, `+309/−48`, all inside
+`patches/0001-fork-tree-view.patch` — 6 files (`+376/−16`), all inside
 `packages/client/ui-workspace`:
 
-- `src/client/tree.ts` (+86) — `deriveGroupForest()` nests a visible human
-  session under its human parent. **Additive**: `deriveFlat`, `deriveGroups` and
-  `search` are untouched, and subagent-origin sessions stay hidden (their
-  activity still surfaces as a count on the nearest ancestor).
-- `src/client/rows/Rows.tsx` (+73) — `SessionTreeNodeItem` recurses rows under a
-  caret + guide line, reusing the official pure row component `SessionNodeItem`.
-- `src/client/rows/WorkspaceBrowser.tsx` (±150) — `forests` memo; expanded groups
-  render forest roots (drag on roots only), collapsed groups keep the official
-  flat preview + overflow button. Flat ("In one list") and search views untouched.
-- `src/client/rows/Rows.module.css` (+48) — indent / caret / guide-line styling
-  using `dsw` design tokens.
+- `src/client/tree.ts` (+119) — `deriveGroupForest()` + `SessionTreeNode` nest a
+  visible human session under its nearest visible human ancestor. **Additive**:
+  `deriveFlat`, `deriveGroups` and `deriveSearchResults` are untouched, and
+  subagent-origin sessions stay hidden (their activity still surfaces as a count
+  on the nearest ancestor). `forest` is gated on the group's `expanded` flag, so
+  a folded group still shows no sessions (the upstream contract).
+- `src/client/rows/Rows.tsx` (+103) — the chevron is the row's **first child
+  inside the existing `.sessionRow`** (reusing the official 16px `.slot` and
+  `.arrow`), mirroring how `ProjectRowItem` does it. `SessionNodeItem` gained
+  optional `children` / `depth` / `treeCollapsed` / `onToggleTree` props and a
+  thin recursive `SessionTreeNodeItem`. No wrapper element around the row.
+- `src/client/rows/WorkspaceBrowser.tsx` (+108) — `forests` memo (rendering
+  only; `groups[].sessions` stays authoritative for drag and overflow),
+  `collapsedForestRows` / `countForestRows` preview budget counted over TOTAL
+  rows (root + descendants, depth-first, limit 5), and per-row fold state.
+- `src/client/rows/Rows.module.css` (+5) — `.forkSlot` (chevron colour/cursor)
+  and `.forkChild { padding-left: var(--fork-indent, 16px) }`. Pure indentation,
+  no rail / border-left.
+- `src/client/locales.ts` (+4) — `sessions.twist.expand` / `.collapse` (zh + en).
+- `tests/workspace-browser.client.spec.tsx` — nesting + total-row preview budget.
 
 ## Upstream provenance
 
 - Repo: https://github.com/deepseek-ai/deepseek-harness
 - Base tag: `dsh-v0.1.2-rc.1`
 - Base commit: `a66e470204` (release(dsh): 0.1.2-rc.1)
-- Development branch: `forktree/dev` @ `2c9f575399`
+- Development branch: `forktree/dev` @ `9c30c5a9d4` (on top of `a66e470204`)
 - License: MIT (upstream `LICENSE` retained)
 
 ## How `lib/` is produced
