@@ -455,11 +455,13 @@ export function SessionNodeItem({
       )}
       role="treeitem"
       aria-selected={selected}
-      // The whole row is the tree's click target: it opens the session AND
-      // unfolds that row's branch, so the disclosure glyph carries no handler
-      // and no nested button (the official project row's span chevron).
+      // The whole row is the tree's click target: it opens the session and unfolds
+      // that row's branch — EXCEPT on the current session, where a click means
+      // "navigate back to me" and must not fold the branch under it. The triangle
+      // is the explicit fold/unfold hit area: a plain <span> handler that stops
+      // propagation, never a nested <button> (the official project row's chevron).
       {...(replaceable !== undefined ? { role: 'treeitem', 'aria-expanded': !replaceable.collapsed } : {})}
-      onClick={() => { onOpen(node.id); onToggleTree?.(node.id) }}
+      onClick={() => { onOpen(node.id); if (!selected) onToggleTree?.(node.id) }}
       draggable={drag !== undefined}
       onDragStart={drag === undefined
         ? undefined
@@ -504,12 +506,18 @@ export function SessionNodeItem({
           stays at the official 22px for every row, fork parent or not. */}
       {forkChildren
         ? (
-            <span className={clsx(css.slot, css.chevron, css.forkTwist, forkTwistClass(primaryStatus.state, showStatus))}>
+            <span
+              className={clsx(css.slot, css.chevron, css.forkTwist, forkTwistClass(primaryStatus.state, showStatus))}
+              // The explicit fold/unfold hit area. It stays a <span> (no tabIndex,
+              // role, or cursor change) and stops propagation so the row's own
+              // open+unfold click does not ALSO fire on a fold click.
+              onClick={(e: { stopPropagation: () => void }) => { e.stopPropagation(); onToggleTree?.(node.id) }}
+            >
               <IconTriangleRightFill14 className={clsx(css.arrow, !treeCollapsed && css.arrowOpen)} />
-              {/* The triangle now means "this row is <status>", so it can no
-                  longer be aria-hidden: pair it with the same screen-reader
-                  label the status dot used. Expand/collapse rides the row's
-                  own aria-expanded above, not a nested button. */}
+              {/* The triangle also means "this row is <status>", so it is not
+                  aria-hidden: pair it with the same screen-reader label the status
+                  dot used. Expand/collapse state stays on the ROW's aria-expanded
+                  above, not on this glyph, and never on a nested button. */}
               {showStatus && <span className={css.visuallyHidden}>{primaryStatus.label}</span>}
             </span>
           )

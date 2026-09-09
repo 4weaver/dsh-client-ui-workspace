@@ -21,10 +21,14 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
   subagent-origin sessions stay hidden (their activity still surfaces as a count
   on the nearest ancestor). `forest` is gated on the group's `expanded` flag, so
   a folded group still shows no sessions (the upstream contract).
-- `src/client/rows/Rows.tsx` — the whole row is the tree's click target:
-  `onClick` opens the session and toggles that row's branch, so the arrow is
-  **not** a nested `<button>` (no `stopPropagation`, no UA chrome) and the row
-  exposes `aria-expanded` instead. The glyph is the official project-row form —
+- `src/client/rows/Rows.tsx` — the whole row is the tree's click target: it
+  opens the session and toggles that row's branch, **except** on the row that
+  IS the current session (`node.id === currentId`), where a click only opens
+  it — navigating back to the session you are already in must not fold the
+  branch under it. Every other row keeps open + toggle. The disclosure
+  triangle is the explicit fold/unfold hit area: its `<span>` has a
+  `stopPropagation` `onClick` that calls `onToggleTree`, so it folds without
+  opening. It stays a `<span>` — **not** a nested `<button>` (no `tabIndex`,
   a plain `<span class="slot chevron">` around `IconTriangleRightFill14` with
   `.arrow` / `.arrowOpen` — and it **is** the row's status indicator: ONE
   leading slot, so the title offset stays at the official 22px and the arrow

@@ -1,5 +1,5 @@
 diff --git a/packages/client/ui-workspace/src/client/rows/Rows.module.css b/packages/client/ui-workspace/src/client/rows/Rows.module.css
-index 7208d4d4b1..d740c52f6b 100644
+index 7208d4d..d740c52 100644
 --- a/packages/client/ui-workspace/src/client/rows/Rows.module.css
 +++ b/packages/client/ui-workspace/src/client/rows/Rows.module.css
 @@ -359,9 +359,39 @@
@@ -44,7 +44,7 @@ index 7208d4d4b1..d740c52f6b 100644
      transition: none;
    }
 diff --git a/packages/client/ui-workspace/src/client/rows/Rows.tsx b/packages/client/ui-workspace/src/client/rows/Rows.tsx
-index 0f917100ff..4e9c12ecb6 100644
+index 0f91710..89588b2 100644
 --- a/packages/client/ui-workspace/src/client/rows/Rows.tsx
 +++ b/packages/client/ui-workspace/src/client/rows/Rows.tsx
 @@ -6,6 +6,7 @@
@@ -130,20 +130,22 @@ index 0f917100ff..4e9c12ecb6 100644
    // Archive hides the row through the registry-global archive set and never
    // touches the session log, so it is not styled as destructive and needs no
    // confirmation dialog.
-@@ -418,7 +455,11 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+@@ -418,7 +455,13 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
        )}
        role="treeitem"
        aria-selected={selected}
 -      onClick={() => { onOpen(node.id) }}
-+      // The whole row is the tree's click target: it opens the session AND
-+      // unfolds that row's branch, so the disclosure glyph carries no handler
-+      // and no nested button (the official project row's span chevron).
++      // The whole row is the tree's click target: it opens the session and unfolds
++      // that row's branch — EXCEPT on the current session, where a click means
++      // "navigate back to me" and must not fold the branch under it. The triangle
++      // is the explicit fold/unfold hit area: a plain <span> handler that stops
++      // propagation, never a nested <button> (the official project row's chevron).
 +      {...(replaceable !== undefined ? { role: 'treeitem', 'aria-expanded': !replaceable.collapsed } : {})}
-+      onClick={() => { onOpen(node.id); onToggleTree?.(node.id) }}
++      onClick={() => { onOpen(node.id); if (!selected) onToggleTree?.(node.id) }}
        draggable={drag !== undefined}
        onDragStart={drag === undefined
          ? undefined
-@@ -444,14 +485,39 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+@@ -444,14 +487,45 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
            drag.drop(rowHalf(e))
          }}
      >
@@ -173,12 +175,18 @@ index 0f917100ff..4e9c12ecb6 100644
 +          stays at the official 22px for every row, fork parent or not. */}
 +      {forkChildren
 +        ? (
-+            <span className={clsx(css.slot, css.chevron, css.forkTwist, forkTwistClass(primaryStatus.state, showStatus))}>
++            <span
++              className={clsx(css.slot, css.chevron, css.forkTwist, forkTwistClass(primaryStatus.state, showStatus))}
++              // The explicit fold/unfold hit area. It stays a <span> (no tabIndex,
++              // role, or cursor change) and stops propagation so the row's own
++              // open+unfold click does not ALSO fire on a fold click.
++              onClick={(e: { stopPropagation: () => void }) => { e.stopPropagation(); onToggleTree?.(node.id) }}
++            >
 +              <IconTriangleRightFill14 className={clsx(css.arrow, !treeCollapsed && css.arrowOpen)} />
-+              {/* The triangle now means "this row is <status>", so it can no
-+                  longer be aria-hidden: pair it with the same screen-reader
-+                  label the status dot used. Expand/collapse rides the row's
-+                  own aria-expanded above, not a nested button. */}
++              {/* The triangle also means "this row is <status>", so it is not
++                  aria-hidden: pair it with the same screen-reader label the status
++                  dot used. Expand/collapse state stays on the ROW's aria-expanded
++                  above, not on this glyph, and never on a nested button. */}
 +              {showStatus && <span className={css.visuallyHidden}>{primaryStatus.label}</span>}
 +            </span>
 +          )
@@ -190,7 +198,7 @@ index 0f917100ff..4e9c12ecb6 100644
        <span className={css.title}>{title}</span>
        {row.hasActiveSchedule && <ActiveScheduleIndicator t={t} />}
        {/* A blank New Session row is a provisional placeholder: nothing has
-@@ -499,3 +562,86 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+@@ -499,3 +573,86 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
      />
    )
  }
@@ -278,7 +286,7 @@ index 0f917100ff..4e9c12ecb6 100644
 +  )
 +}
 diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
-index 9d9dd376e4..49e33c3d93 100644
+index 9d9dd37..49e33c3 100644
 --- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
 +++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
 @@ -21,9 +21,9 @@ import type {
@@ -492,7 +500,7 @@ index 9d9dd376e4..49e33c3d93 100644
                )}
              </div>
 diff --git a/packages/client/ui-workspace/src/client/tree.ts b/packages/client/ui-workspace/src/client/tree.ts
-index ec921306f9..202211bfa3 100644
+index ec92130..202211b 100644
 --- a/packages/client/ui-workspace/src/client/tree.ts
 +++ b/packages/client/ui-workspace/src/client/tree.ts
 @@ -63,6 +63,22 @@ export interface GroupNode {
@@ -629,7 +637,7 @@ index ec921306f9..202211bfa3 100644
   * Derive the flat session list ("In one list" mode): every session — fork
   * children included — as a top-level row, strictly newest-first. No grouping,
 diff --git a/packages/client/ui-workspace/tests/browser-styles.client.spec.ts b/packages/client/ui-workspace/tests/browser-styles.client.spec.ts
-index 3d0f31b318..9a65af5d0a 100644
+index 3d0f31b..9a65af5 100644
 --- a/packages/client/ui-workspace/tests/browser-styles.client.spec.ts
 +++ b/packages/client/ui-workspace/tests/browser-styles.client.spec.ts
 @@ -113,4 +113,31 @@ describe('WorkspaceBrowser.module.css list', () => {
@@ -665,7 +673,7 @@ index 3d0f31b318..9a65af5d0a 100644
 +  })
  })
 diff --git a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
-index 8ee31d37c9..2e7dfde7f9 100644
+index 8ee31d3..1f1b9ce 100644
 --- a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
 +++ b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
 @@ -453,7 +453,10 @@ describe('WorkspaceBrowser', () => {
@@ -680,7 +688,7 @@ index 8ee31d37c9..2e7dfde7f9 100644
      const parent = summary('parent-s', 2)
      const child = { ...summary('child-s', 1), parentId: parent.id }
      mount({
-@@ -461,9 +464,215 @@ describe('WorkspaceBrowser', () => {
+@@ -461,9 +464,259 @@ describe('WorkspaceBrowser', () => {
        useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
      })
      fireEvent.click(screen.getByText('alpha'))
@@ -724,10 +732,12 @@ index 8ee31d37c9..2e7dfde7f9 100644
 +    // the depth-0 parent keeps its indent-free leading status slot, and is draggable
 +    expect(parentRow?.firstElementChild?.className).not.toContain('forkIndent')
 +    expect(parentRow?.getAttribute('draggable')).toBe('true')
-+    // The whole row is the toggle: no button anywhere in the tree, and clicking
-+    // the row's title cell folds the branch away.
++    // No ACTIVE row here, so the row click still folds: the triangle is the
++    // explicit fold hit area — a <span> handler, never a nested button.
 +    expect(screen.queryAllByRole('button', { name: /分支会话/ })).toHaveLength(0)
-+    fireEvent.click(screen.getByText('parent-s'))
++    const parentTwist = Array.from(parentRow?.children ?? [])
++      .find(el => el.className.includes('slot')) as HTMLElement
++    fireEvent.click(parentTwist)
 +    expect(screen.queryAllByText('child-s').filter(node => node.closest('[role="treeitem"]') !== null)).toHaveLength(0)
 +    expect(parentRow?.getAttribute('aria-expanded')).toBe('false')
 +    // ... and clicking the row again opens the session and unfolds the branch.
@@ -736,25 +746,67 @@ index 8ee31d37c9..2e7dfde7f9 100644
 +    expect(screen.getAllByText('child-s').filter(node => node.closest('[role="treeitem"]') !== null)).toHaveLength(1)
 +  })
 +
-+  it('opens the session from anywhere on the row, not just the disclosure', () => {
++  it('opens the session from anywhere on the row, and a non-current row click also folds it', () => {
 +    const parent = summary('parent-s', 2)
 +    const child = { ...summary('child-s', 1), parentId: parent.id }
 +    const open = vi.fn()
 +    mount({
-+      useSessions: hook(sessionState([parent, child])),
++      useSessions: hook(sessionState([parent, child], { current: sid('parent-s') })),
 +      useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
 +      open,
 +    })
-+    fireEvent.click(screen.getByText('alpha'))
-+    // The leading status slot is now part of the click target (it used to hold
-+    // the stopPropagation button), as is the title cell.
-+    fireEvent.click((screen.getByText('parent-s').closest('[role="treeitem"]') as HTMLElement).firstElementChild as HTMLElement)
-+    expect(open).toHaveBeenCalledWith('parent-s')
-+    // Same click folds the branch; clicking the row again unfolds it and the
-+    // child's title cell is a target of its own.
++    const parentRow = screen.getByText('parent-s').closest('[role="treeitem"]') as HTMLElement
++    // The title cell is part of the row's click target. (The leading status slot
++    // is the triangle now, and the triangle stops propagation by design.) The
++    // parent row IS the current session here, so the row click only opens it and
++    // never folds — that was the reported bug.
 +    fireEvent.click(screen.getByText('parent-s'))
++    expect(open).toHaveBeenCalledWith('parent-s')
++    expect(parentRow.getAttribute('aria-expanded')).toBe('true')
++    expect(screen.getAllByText('child-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(1)
++    // A non-current row keeps the open + fold behavior, and the child's title
++    // cell is a target of its own.
 +    fireEvent.click(screen.getByText('child-s'))
 +    expect(open).toHaveBeenCalledWith('child-s')
++  })
++
++  it('opens the current row without folding; only its triangle folds; a non-current row still toggles', () => {
++    // parent -> child, with the PARENT selected: clicking the row is "navigate
++    // back to me", not "fold the branch I am looking at".
++    const parent = summary('parent-s', 2)
++    const child = { ...summary('child-s', 1), parentId: parent.id }
++    const open = vi.fn()
++    const b = mount({
++      useSessions: hook(sessionState([parent, child], { current: sid('parent-s') })),
++      useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
++      open,
++    })
++    const row = (title: string) => screen.getByText(title).closest('[role="treeitem"]') as HTMLElement
++    const twist = (title: string) =>
++      Array.from(row(title).children).find(el => el.className.includes('slot')) as HTMLElement
++    const childVisible = () =>
++      screen.queryAllByText('child-s').filter(n => n.closest('[role="treeitem"]') !== null)
++    // 1. the CURRENT session's row: opens, does NOT fold
++    expect(row('parent-s').getAttribute('aria-expanded')).toBe('true')
++    fireEvent.click(screen.getByText('parent-s'))
++    expect(open).toHaveBeenCalledWith('parent-s')
++    expect(row('parent-s').getAttribute('aria-expanded')).toBe('true')
++    expect(childVisible()).toHaveLength(1)
++    // 2. that same row's triangle: the explicit fold hit area, and it does not
++    //    open the session (stopPropagation keeps the row handler out).
++    open.mockClear()
++    fireEvent.click(twist('parent-s'))
++    expect(row('parent-s').getAttribute('aria-expanded')).toBe('false')
++    expect(childVisible()).toHaveLength(0)
++    expect(open).not.toHaveBeenCalled()
++    // 3. a NON-current row still opens + toggles (upstream behavior): re-open
++    //    the parent through its triangle, then click the child row. The child
++    //    is a leaf (nothing to fold), and the parent's branch stays visible.
++    fireEvent.click(twist('parent-s'))
++    expect(row('parent-s').getAttribute('aria-expanded')).toBe('true')
++    fireEvent.click(screen.getByText('child-s'))
++    expect(open).toHaveBeenCalledWith('child-s')
++    expect(row('parent-s').getAttribute('aria-expanded')).toBe('true')
 +  })
 +
 +  it('auto-expands the selected session\'s branch without fighting a budget fold', () => {
