@@ -491,7 +491,10 @@ export function SessionNodeItem({
       {depth !== undefined && depth > 0 && (
         <span
           className={css.forkIndent}
-          style={{ ['--fork-indent' as string]: `${depth} * var(--fork-indent-unit, 16px)` }}
+          // The multiply MUST sit inside calc(): a bare `N * var(...)` is an
+          // invalid computed value, so `width` fell back to auto and the row
+          // rendered with no indent at all.
+          style={{ ['--fork-indent' as string]: `calc(${depth} * var(--fork-indent-unit, 16px))` }}
         />
       )}
       {/* ONE leading slot per row. A fork parent's slot holds the official

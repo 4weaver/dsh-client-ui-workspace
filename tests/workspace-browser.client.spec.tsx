@@ -494,6 +494,10 @@ describe('WorkspaceBrowser', () => {
     const indent = childRow?.firstElementChild
     expect(indent?.className).toContain('forkIndent')
     expect(indent?.getAttribute('style')).toContain('--fork-indent')
+    // The multiply must be wrapped: `depth * var(...)` without calc() is an
+    // invalid computed value, which silently collapsed the indent to width:auto.
+    expect(indent?.getAttribute('style')).toContain('calc(')
+    expect(indent?.getAttribute('style')).toMatch(/calc\(1 \* var\(--fork-indent-unit/)
     // the depth-0 parent keeps its indent-free leading status slot, and is draggable
     expect(parentRow?.firstElementChild?.className).not.toContain('forkIndent')
     expect(parentRow?.getAttribute('draggable')).toBe('true')

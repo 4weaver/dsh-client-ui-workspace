@@ -82,7 +82,7 @@ export declare function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
-export declare function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat, children, treeCollapsed, onToggleTree, t, }: {
+export declare function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat, children, depth, treeCollapsed, onToggleTree, t, }: {
     node: SessionNode;
     currentId: string | undefined;
     now: number;
@@ -103,7 +103,7 @@ export declare function SessionNodeItem({ node, currentId, now, onOpen, onRename
     depth?: number | undefined;
     /** This row's own children are folded away. */
     treeCollapsed?: boolean | undefined;
-    /** Disclosure toggle owned by the tree renderer; absent on leaf rows. */
+    /** Fold/unfold this row's subtree (the row click calls it). */
     onToggleTree?: ((id: SessionNode['id']) => void) | undefined;
     t: RowTranslate;
 }): import("react").JSX.Element;
@@ -118,7 +118,7 @@ export declare function SessionNodeItem({ node, currentId, now, onOpen, onRename
  * @param props.drag - drag wiring, passed only at depth 0.
  * @returns the row subtree fragment.
  */
-export declare function SessionTreeNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, depth, collapsed, onToggle, drag, t, }: {
+export declare function SessionTreeNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, depth, foldedIds, onToggle, drag, t, }: {
     node: SessionTreeNode;
     currentId: string | undefined;
     now: number;
@@ -127,7 +127,8 @@ export declare function SessionTreeNodeItem({ node, currentId, now, onOpen, onRe
     onFork: (id: SessionNode['id']) => void;
     onArchive: (id: SessionNode['id']) => void;
     depth?: number | undefined;
-    collapsed?: boolean | undefined;
+    /** Every folded row of this group (budget-clipped and user-folded alike). */
+    foldedIds?: ReadonlySet<string> | undefined;
     onToggle: (id: SessionNode['id']) => void;
     /** Present only for depth-0 roots; nested rows never initiate a drag. */
     drag?: RowDragProps | undefined;

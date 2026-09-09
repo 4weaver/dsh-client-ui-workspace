@@ -143,7 +143,7 @@ index 0f917100ff..4e9c12ecb6 100644
        draggable={drag !== undefined}
        onDragStart={drag === undefined
          ? undefined
-@@ -444,14 +485,36 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+@@ -444,14 +485,39 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
            drag.drop(rowHalf(e))
          }}
      >
@@ -160,7 +160,10 @@ index 0f917100ff..4e9c12ecb6 100644
 +      {depth !== undefined && depth > 0 && (
 +        <span
 +          className={css.forkIndent}
-+          style={{ ['--fork-indent' as string]: `${depth} * var(--fork-indent-unit, 16px)` }}
++          // The multiply MUST sit inside calc(): a bare `N * var(...)` is an
++          // invalid computed value, so `width` fell back to auto and the row
++          // rendered with no indent at all.
++          style={{ ['--fork-indent' as string]: `calc(${depth} * var(--fork-indent-unit, 16px))` }}
 +        />
        )}
 +      {/* ONE leading slot per row. A fork parent's slot holds the official
@@ -677,7 +680,7 @@ index 8ee31d37c9..2e7dfde7f9 100644
      const parent = summary('parent-s', 2)
      const child = { ...summary('child-s', 1), parentId: parent.id }
      mount({
-@@ -461,9 +464,211 @@ describe('WorkspaceBrowser', () => {
+@@ -461,9 +464,215 @@ describe('WorkspaceBrowser', () => {
        useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
      })
      fireEvent.click(screen.getByText('alpha'))
@@ -714,6 +717,10 @@ index 8ee31d37c9..2e7dfde7f9 100644
 +    const indent = childRow?.firstElementChild
 +    expect(indent?.className).toContain('forkIndent')
 +    expect(indent?.getAttribute('style')).toContain('--fork-indent')
++    // The multiply must be wrapped: `depth * var(...)` without calc() is an
++    // invalid computed value, which silently collapsed the indent to width:auto.
++    expect(indent?.getAttribute('style')).toContain('calc(')
++    expect(indent?.getAttribute('style')).toMatch(/calc\(1 \* var\(--fork-indent-unit/)
 +    // the depth-0 parent keeps its indent-free leading status slot, and is draggable
 +    expect(parentRow?.firstElementChild?.className).not.toContain('forkIndent')
 +    expect(parentRow?.getAttribute('draggable')).toBe('true')
