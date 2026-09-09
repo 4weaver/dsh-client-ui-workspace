@@ -12,7 +12,7 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
 
 ## What changed
 
-`patches/0001-fork-tree-view.patch` — 5 files (`+513/−17`), all inside
+`patches/0001-fork-tree-view.patch` — 6 files (`+672/−25`), all inside
 `packages/client/ui-workspace`:
 
 - `src/client/tree.ts` (+119) — `deriveGroupForest()` + `SessionTreeNode` nest a
@@ -21,13 +21,19 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
   subagent-origin sessions stay hidden (their activity still surfaces as a count
   on the nearest ancestor). `forest` is gated on the group's `expanded` flag, so
   a folded group still shows no sessions (the upstream contract).
-- `src/client/rows/Rows.tsx` (+134) — the whole row is the tree's click target:
+- `src/client/rows/Rows.tsx` — the whole row is the tree's click target:
   `onClick` opens the session and toggles that row's branch, so the arrow is
   **not** a nested `<button>` (no `stopPropagation`, no UA chrome) and the row
   exposes `aria-expanded` instead. The glyph is the official project-row form —
   a plain `<span class="slot chevron">` around `IconTriangleRightFill14` with
-  `.arrow` / `.arrowOpen` — and rides the row's existing leading status slot,
-  so it adds no width (a state dot shares that 16px cell, 2px away). A width-only
+  `.arrow` / `.arrowOpen` — and it **is** the row's status indicator: ONE
+  leading slot, so the title offset stays at the official 22px and the arrow
+  replaces `SessionStatusDots` (amber pending, blue + breathe running, green
+  finished-but-unviewed, red error, caption grey otherwise) rather than sharing
+  its cell. A width-only `.forkIndent` block on the row itself carries nesting,
+  keeping the row a full-width flex child. `SessionNodeItem` gained optional
+  `children` / `depth` / `treeCollapsed` / `onToggleTree`;
+  `SessionTreeNodeItem` renders the subtree,
   `.forkIndent` block on the row itself carries nesting, keeping the row a
   full-width flex child. `SessionNodeItem` gained optional `children` / `depth` /
   `treeCollapsed` / `onToggleTree`; `SessionTreeNodeItem` renders the subtree,
@@ -40,9 +46,11 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
   clears the user's manual fold ONLY: budget-clipped rows never enter
   `collapsedTreeRows`, so a handful of pixels never force-expands a truncated
   subtree.
-- `src/client/rows/Rows.module.css` (+9) — `.forkIndent` (width-only indent, no
-  rail) and `.forkTwist > svg { margin-right: -6px }` (chevron + dot share one
-  status slot). Pure indentation, no border-left.
+- `src/client/rows/Rows.module.css` — `.forkIndent` (width-only indent, no
+  rail), plus the `.forkTwist*` state colours and the `fork-twist-breathe`
+  opacity keyframes that make the triangle a status indicator (rotation stays
+  reserved for `expanded`; `prefers-reduced-motion: reduce` disables the
+  breathe). Pure indentation, no border-left.
 - `tests/workspace-browser.client.spec.tsx` — nesting, whole-row click,
   selection auto-expand, total-row preview budget.
 
@@ -51,7 +59,7 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
 - Repo: https://github.com/deepseek-ai/deepseek-harness
 - Base tag: `dsh-v0.1.2-rc.1`
 - Base commit: `a66e470204` (release(dsh): 0.1.2-rc.1)
-- Development branch: `forktree/dev` @ `245c9e6c5b` (on top of `a66e470204`)
+- Development branch: `forktree/dev` @ `a1b78faec8` (on top of `a66e470204`)
 - License: MIT (upstream `LICENSE` retained)
 
 ## How `lib/` is produced

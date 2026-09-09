@@ -113,4 +113,31 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(declarations('.rail .iconButton')?.get('width')).toBe('36px')
     expect(declarations('.rail .search')?.get('width')).toBe('36px')
   })
+
+  // The fork disclosure triangle doubles as the row's status indicator, so the
+  // colour vocabulary and the reduced-motion escape hatch are part of the
+  // contract, not cosmetics.
+  it('colours the fork triangle per state and honours reduced motion', () => {
+    // ongoing blue has no alias token — pinned to the static scale like StateDot
+    expect(rowDeclarations('.forkTwist')?.get('--dsh-state-ongoing'))
+      .toBe('var(--dsw-static-deepseek-450)')
+    expect(rowDeclarations('.forkTwistPrimary')?.get('color'))
+      .toBe('var(--dsw-alias-state-warn-primary)')
+    expect(rowDeclarations('.forkTwistOngoing')?.get('color')).toBe('var(--dsh-state-ongoing)')
+    expect(rowDeclarations('.forkTwistDone')?.get('color'))
+      .toBe('var(--dsw-alias-state-success-primary)')
+    expect(rowDeclarations('.forkTwistError')?.get('color'))
+      .toBe('var(--dsw-alias-state-error-primary)')
+    // breathe, never rotate: rotation already means "expanded" (.arrowOpen).
+    // Assert on source text — the helper's last-wins map would otherwise pick up
+    // the reduced-motion override further down the file.
+    expect(rowsCss).toContain('.forkTwistOngoing > svg { animation: fork-twist-breathe 1.2s ease-in-out infinite; }')
+    expect(rowsCss).not.toMatch(/\.forkTwist[^{]*\{[^}]*rotate/)
+    // the old negative-margin squeeze is gone with the second slot
+    expect(rowsCss.includes('margin-right: -6px')).toBe(false)
+    // and the reduce block still switches the breathe animation off
+    const reduce = rowsCss.slice(rowsCss.indexOf('prefers-reduced-motion'))
+    expect(reduce).toContain('.forkTwistOngoing > svg')
+    expect(reduce).toContain('animation: none')
+  })
 })

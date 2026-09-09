@@ -281,6 +281,23 @@ function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ..
   )
 }
 
+/**
+ * The disclosure triangle doubles as the row's status indicator, so it takes the
+ * primary status's colour (the same state vocabulary the status dot uses) and
+ * breathes while the row is live. Idle keeps the plain caption chevron grey, and
+ * a row with nothing to report shows the bare glyph with no colour class at all.
+ */
+function forkTwistClass(state: StateDotState, showStatus: boolean): string | undefined {
+  if (!showStatus) return ''
+  switch (state) {
+    case 'warning': return css.forkTwistPrimary
+    case 'ongoing': return css.forkTwistOngoing
+    case 'done': return css.forkTwistDone
+    /* v8 ignore next -- ui-workspace statuses never reach error; red stays for parity */
+    case 'error': return css.forkTwistError
+  }
+}
+
 /** Non-interactive active-Schedule marker; the enclosing row remains the only action. */
 function ActiveScheduleIndicator({ t, search = false }: { t: RowTranslate; search?: boolean }) {
   const label = t('schedule.active')
@@ -477,26 +494,27 @@ export function SessionNodeItem({
           style={{ ['--fork-indent' as string]: `${depth} * var(--fork-indent-unit, 16px)` }}
         />
       )}
-      {/* Fork-tree disclosure: the official project-row chevron (16px .slot +
-          .chevron colour + .arrow rotation) with no button chrome. It rides the
-          row's own leading status slot, so it adds no column of its own; a row
-          whose status dot shares that slot shows both side by side. */}
-      {forkChildren && (
-        <span
-          className={clsx(css.slot, css.chevron, css.forkTwist)}
-          aria-hidden="true"
-        >
-          <IconTriangleRightFill14 className={clsx(css.arrow, !treeCollapsed && css.arrowOpen)} />
-        </span>
-      )}
-      {/* Pending interaction and own or descendant activity outrank the
-          finished-but-unviewed reminder, which returns after activity stops
-          and is cleared by opening the session. */}
-      {(!flat || showStatus) && (
-        <span className={css.slot}>
-          {showStatus && <SessionStatusDots statuses={statuses} />}
-        </span>
-      )}
+      {/* ONE leading slot per row. A fork parent's slot holds the official
+          project-row chevron (16px .slot + .arrow rotation, no button chrome),
+          and that same glyph carries the row's status — so it replaces
+          SessionStatusDots instead of sitting next to it. Title offset therefore
+          stays at the official 22px for every row, fork parent or not. */}
+      {forkChildren
+        ? (
+            <span className={clsx(css.slot, css.chevron, css.forkTwist, forkTwistClass(primaryStatus.state, showStatus))}>
+              <IconTriangleRightFill14 className={clsx(css.arrow, !treeCollapsed && css.arrowOpen)} />
+              {/* The triangle now means "this row is <status>", so it can no
+                  longer be aria-hidden: pair it with the same screen-reader
+                  label the status dot used. Expand/collapse rides the row's
+                  own aria-expanded above, not a nested button. */}
+              {showStatus && <span className={css.visuallyHidden}>{primaryStatus.label}</span>}
+            </span>
+          )
+        : (!flat || showStatus) && (
+            <span className={css.slot}>
+              {showStatus && <SessionStatusDots statuses={statuses} />}
+            </span>
+          )}
       <span className={css.title}>{title}</span>
       {row.hasActiveSchedule && <ActiveScheduleIndicator t={t} />}
       {/* A blank New Session row is a provisional placeholder: nothing has

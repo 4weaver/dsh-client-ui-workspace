@@ -33,12 +33,18 @@ assert.strictEqual(typeof registered.factory, 'function', 'factory must be a fun
 assert.match(SRC, /deriveGroupForest/, 'fork-tree tree derivation missing from bundle')
 assert.match(SRC, /SessionTreeNodeItem/, 'fork-tree row component missing from bundle')
 // arrow parity with the official project row: plain 16px slot span + .chevron
-// tint + rotating .arrow, no button chrome and no extra width-consuming class
+// tint + rotating .arrow, no button chrome and no extra width-consuming class.
+// The triangle IS the row's status indicator, so it also carries a state colour
+// class and a breathe animation instead of the old negative-margin squeeze.
 assert.match(SRC, /forkIndent\{width:var\(--fork-indent/, 'row-level indent rule missing from bundle')
-assert.match(SRC, /forkTwist>svg\{margin-right:-6px\}/, 'shared status-slot chevron rule missing from bundle')
+assert.match(SRC, /forkTwist\{[^}]*--dsh-state-ongoing/, 'ongoing blue token must be pinned on the chevron rule')
+assert.match(SRC, /forkTwistOngoing\{color:var\(--dsh-state-ongoing\)/, 'running state colour missing from bundle')
+assert.match(SRC, /forkTwistDone\{color:var\(--dsw-alias-state-success-primary\)/, 'completed state colour missing from bundle')
+assert.match(SRC, /forkTwistPrimary\{color:var\(--dsw-alias-state-warn-primary\)/, 'pending state colour missing from bundle')
+assert.match(SRC, /fork-twist-breathe/, 'running breathe animation missing from bundle')
+assert.ok(!/forkTwist>svg\{margin-right/.test(SRC), 'the obsolete negative-margin squeeze must be gone')
 assert.match(SRC, /_chevron[^"']*forkTwist/, 'chevron must keep the official .chevron colour class')
 assert.ok(!/forkSlot/.test(SRC), 'the old width-adding forkSlot must be gone')
-
 // upstream behaviour that must never be lost
 assert.match(SRC, /deriveFlat/, 'upstream deriveFlat must survive')
 assert.match(SRC, /deriveGroups/, 'upstream deriveGroups must survive')

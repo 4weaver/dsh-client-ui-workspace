@@ -454,8 +454,8 @@ describe('WorkspaceBrowser', () => {
   })
 
   // Fork-tree fork: upstream rc.1 flattens fork children to top-level rows;
-  // this build nests them under their human parent behind an always-visible
-  // chevron that lives INSIDE the row (no wrapper element).
+  // this build nests them under their human parent behind the parent row's own
+  // disclosure chevron (the official project-row span, no nested button).
   it('nests a fork child under its parent behind the parent row disclosure', () => {
     const parent = summary('parent-s', 2)
     const child = { ...summary('child-s', 1), parentId: parent.id }
@@ -464,12 +464,16 @@ describe('WorkspaceBrowser', () => {
       useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
     })
     fireEvent.click(screen.getByText('alpha'))
-    // the parent exposes the disclosure and starts expanded
-    const twist = screen.getByRole('button', { name: '收起分支会话' })
-    expect(twist.getAttribute('aria-expanded')).toBe('true')
-    // the chevron is a child of the parent's own row element, not a wrapper
+    // the parent row states its own disclosure state, and starts expanded
     const parentRow = screen.getByText('parent-s').closest('[role="treeitem"]')
-    expect(parentRow?.contains(twist)).toBe(true)
+    expect(parentRow?.getAttribute('aria-expanded')).toBe('true')
+    // the glyph is decorative markup inside the row (no button, no handler)
+    // the glyph lives in the row's single leading slot and is no longer
+    // decorative-only: it carries the status meaning too, so it is not hidden
+    // from assistive tech any more (no button, no handler — the row toggles).
+    const twist = parentRow?.querySelector('[class*="slot"]')
+    expect(twist?.tagName).toBe('SPAN')
+    expect(twist?.querySelector('svg')).toBeTruthy()
     // the child row is nested UNDER the parent row, and is not draggable
     const childRow = screen.getAllByText('child-s')
       .map(node => node.closest('[role="treeitem"]'))
@@ -477,23 +481,166 @@ describe('WorkspaceBrowser', () => {
     expect(parentRow !== null && childRow != null
       && (parentRow.compareDocumentPosition(childRow) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
     expect(childRow?.getAttribute('draggable')).toBe('false')
-    expect(childRow?.querySelector('[aria-label="收起分支会话"]')).toBeNull()
-    // The indent wrapper must be a BLOCK box (display:block in the stylesheet)
-    // and must contain exactly the one row: an inline wrapper would leave the
-    // nested row at full container width, which is the width bug this rebuild
-    // exists to avoid. jsdom cannot measure layout, so assert structure here
-    // and the built CSS in the bundle-contract/runtime checks.
-    // Row -> HoverCard wrapper span -> .forkChild indent block.
-    const wrapper = childRow?.parentElement?.parentElement
-    expect(wrapper?.className).toContain('forkChild')
-    expect(wrapper?.firstElementChild?.contains(childRow as Node)).toBe(true)
-    // the depth-0 parent stays draggable
+    // a leaf row carries no disclosure glyph in its leading slot (the row's own
+    // trailing Menu icon is a separate svg, so scope the query to the slot)
+    const childSlot = Array.from(childRow?.children ?? []).find(el => el.className.includes('slot'))
+    expect(childSlot?.querySelector('svg')).toBeNull()
+    // jsdom cannot measure layout, so assert the structure the alignment depends
+    // on: the child row is a bare full-width flex child of the list (no wrapper
+    // span), and its own first element is the leading indent block that makes the
+    // content box follow depth instead of a padded wrapper.
+    // Row -> HoverCard wrapper span -> group section -> the list itself.
+    expect(childRow?.closest('[role="tree"]')).not.toBeNull()
+    const indent = childRow?.firstElementChild
+    expect(indent?.className).toContain('forkIndent')
+    expect(indent?.getAttribute('style')).toContain('--fork-indent')
+    // the depth-0 parent keeps its indent-free leading status slot, and is draggable
+    expect(parentRow?.firstElementChild?.className).not.toContain('forkIndent')
     expect(parentRow?.getAttribute('draggable')).toBe('true')
-    // collapsing the parent hides the child row (its portaled hover copy may stay)
-    fireEvent.click(twist)
+    // The whole row is the toggle: no button anywhere in the tree, and clicking
+    // the row's title cell folds the branch away.
+    expect(screen.queryAllByRole('button', { name: /分支会话/ })).toHaveLength(0)
+    fireEvent.click(screen.getByText('parent-s'))
     expect(screen.queryAllByText('child-s').filter(node => node.closest('[role="treeitem"]') !== null)).toHaveLength(0)
-    expect(screen.getByRole('button', { name: '展开分支会话' }).getAttribute('aria-expanded')).toBe('false')
+    expect(parentRow?.getAttribute('aria-expanded')).toBe('false')
+    // ... and clicking the row again opens the session and unfolds the branch.
+    fireEvent.click(screen.getByText('parent-s'))
+    expect(parentRow?.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getAllByText('child-s').filter(node => node.closest('[role="treeitem"]') !== null)).toHaveLength(1)
   })
+
+  it('opens the session from anywhere on the row, not just the disclosure', () => {
+    const parent = summary('parent-s', 2)
+    const child = { ...summary('child-s', 1), parentId: parent.id }
+    const open = vi.fn()
+    mount({
+      useSessions: hook(sessionState([parent, child])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
+      open,
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    // The leading status slot is now part of the click target (it used to hold
+    // the stopPropagation button), as is the title cell.
+    fireEvent.click((screen.getByText('parent-s').closest('[role="treeitem"]') as HTMLElement).firstElementChild as HTMLElement)
+    expect(open).toHaveBeenCalledWith('parent-s')
+    // Same click folds the branch; clicking the row again unfolds it and the
+    // child's title cell is a target of its own.
+    fireEvent.click(screen.getByText('parent-s'))
+    fireEvent.click(screen.getByText('child-s'))
+    expect(open).toHaveBeenCalledWith('child-s')
+  })
+
+  it('auto-expands the selected session\'s branch without fighting a budget fold', () => {
+    // parent -> mid -> leaf, with the selection on the deepest row.
+    const parent = summary('parent-s', 3)
+    const mid = { ...summary('mid-s', 2), parentId: parent.id }
+    const leaf = { ...summary('leaf-s', 1), parentId: mid.id }
+    const sessions = [parent, mid, leaf]
+    const b = mount({
+      useSessions: hook(sessionState(sessions)),
+      useWorkspaces: hook(workspaceState([workspace('alpha', sessions.map(s => s.id))])),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    const row = (title: string) => screen.getByText(title).closest('[role="treeitem"]') as HTMLElement
+    // The user folds the whole branch by hand...
+    fireEvent.click(screen.getByText('parent-s'))
+    expect(row('parent-s').getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(0)
+    // ...and selecting a hidden descendant unfolds every ancestor above it.
+    rerender(b, { useSessions: hook(sessionState(sessions, { current: sid('leaf-s') })) })
+    expect(row('parent-s').getAttribute('aria-expanded')).toBe('true')
+    expect(row('mid-s').getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(1)
+    // A manual click always toggles, even on the selected branch's ancestor:
+    // the auto-expand fires on the selection change, not on every render.
+    fireEvent.click(screen.getByText('mid-s'))
+    expect(row('mid-s').getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(0)
+    // Re-selecting the same session is a new selection change and unfolds again.
+    rerender(b, { useSessions: hook(sessionState(sessions, { current: sid('leaf-s') })) })
+    expect(row('mid-s').getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(1)
+  })
+
+  // The fork parent's disclosure triangle IS its status indicator (user
+  // decision): one leading slot, never two, so the title offset stays at the
+  // official 22px. jsdom has no layout engine, so these assertions pin the
+  // STRUCTURE the alignment and colouring depend on; the pixel result is the
+  // user's to confirm in a real browser.
+  it('gives a fork parent exactly one leading slot, colouring the triangle by status', () => {
+    const parent = { ...summary('parent-s', 2), completed: true }
+    const child = { ...summary('child-s', 1), parentId: parent.id }
+    mount({
+      useSessions: hook(sessionState([parent, child])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    const parentRow = screen.getByText('parent-s').closest('[role="treeitem"]') as HTMLElement
+    // exactly ONE leading slot: the triangle REPLACES the status dot slot
+    const slots = Array.from(parentRow.children).filter(el => el.className.includes('slot'))
+    expect(slots).toHaveLength(1)
+    const twist = slots[0] as HTMLElement
+    expect(twist.querySelector('svg')).toBeTruthy()
+    // completed -> green, and the slot carries the state class, not just .chevron
+    expect(twist.className).toMatch(/forkTwist(?!\s)/)
+    expect(twist.className.includes('forkTwistDone')).toBe(true)
+    // no StateDot from the status slot is present inside the parent row
+    expect(twist.querySelectorAll('svg')).toHaveLength(1)
+    // the triangle is no longer decorative: status reaches assistive tech, and
+    // expand/collapse stays on the row's own aria-expanded (no nested button).
+    expect(slots[0]?.getAttribute('aria-hidden')).toBeNull()
+    expect(slots[0]?.textContent).toBe('已完成')
+    expect(parentRow.getAttribute('aria-expanded')).toBe('true')
+    // ...and no nested disclosure button was introduced anywhere in the row
+    expect(parentRow.querySelectorAll('button[aria-expanded]')).toHaveLength(0)
+  })
+
+  it('colours the fork triangle amber for pending and blue for running', () => {
+    const pending = { ...summary('p-s', 3) }
+    const pendingChild = { ...summary('p-child', 2), parentId: pending.id }
+    const running = { ...summary('r-s', 3), running: true }
+    const runningChild = { ...summary('r-child', 2), parentId: running.id }
+    mount({
+      useSessions: hook(sessionState([pending, pendingChild, running, runningChild])),
+      useWorkspaces: hook(workspaceState([
+        workspace('alpha', ['p-s', 'p-child']),
+        workspace('beta', ['r-s', 'r-child']),
+      ])),
+      // The row only reads `.kind`; the domain-owned interaction object carries
+      // private fields, so a structural stub is cast through unknown.
+      useSessionPendingInteraction: hook(new Map([
+        [pending.id, { key: 'question:1', kind: 'plan-review', sessionId: pending.id }],
+      ]) as unknown as SessionPendingInteractionSnapshot),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(screen.getByText('beta'))
+    const twistOf = (title: string) => {
+      const row = screen.getByText(title).closest('[role="treeitem"]') as HTMLElement
+      return Array.from(row.children).find(el => el.className.includes('slot')) as HTMLElement
+    }
+    const amber = twistOf('p-s')
+    expect(amber.className.includes('forkTwistPrimary')).toBe(true)
+    expect(amber.textContent).toBe('计划待审')
+    const blue = twistOf('r-s')
+    expect(blue.className.includes('forkTwistOngoing')).toBe(true)
+    expect(blue.textContent).toBe('进行中')
+  })
+
+  it('leaves a childless row on the official status-dot path', () => {
+    mount({
+      useSessions: hook(sessionState([{ ...summary('solo-s', 1), running: true }])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['solo-s'])])),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    const row = screen.getByText('solo-s').closest('[role="treeitem"]') as HTMLElement
+    const slots = Array.from(row.children).filter(el => el.className.includes('slot'))
+    expect(slots).toHaveLength(1)
+    // no disclosure glyph, and the status dot still renders in that slot
+    expect(slots[0]?.querySelector('svg')).toBeTruthy()
+    expect(slots[0]?.className.includes('forkTwist')).toBe(false)
+    expect(row.querySelector('button[aria-expanded]')).toBeNull()
+  })
+
 
   it('budgets the folded preview by total rows so fork children show before Show more', () => {
     // root + 5 children = 6 rows under a 5-row budget: the root and its four
@@ -515,6 +662,10 @@ describe('WorkspaceBrowser', () => {
       .map(row => row.querySelector('span[class*="title"]')?.textContent)
     expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4'])
     expect(screen.getByRole('button', { name: '展开其余 1 个会话' })).toBeTruthy()
+    // Clicking a budget-clipped row's stand-in cannot fold anything: its own
+    // children are gone, so the fold is a no-op and the rows stay rendered.
+    fireEvent.click(screen.getByText('kid-4'))
+    expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4'])
     // Expanding reveals the withheld child in place (still nested, in order).
     fireEvent.click(screen.getByRole('button', { name: '展开其余 1 个会话' }))
     expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4', 'kid-5'])

@@ -363,14 +363,35 @@
    later if wanted). The row element itself carries the indent so the row keeps
    its full-width flex box; only its content box follows depth. */
 .forkIndent { flex: none; width: var(--fork-indent, 16px); height: 20px; }
-/* The disclosure glyph reuses the leading status slot's 16px cell: with a
-   visible status dot the two share that cell (paired 2px apart) instead of
-   adding a column, and with no status dot the glyph simply occupies it. */
-.forkTwist > svg { margin-right: -6px; }
+/* The disclosure triangle IS the row's status indicator (user decision): it
+   never shares the leading slot with a status dot, so the title offset stays at
+   the official 22px (16px slot + 6px gap) no matter how deep the row nests. */
+.forkTwist {
+  /* Ongoing blue has no alias token (state-business-primary is the 500 step,
+     not this 450) — component-level var pinned to the static scale, following
+     StateDot.module.css. */
+  --dsh-state-ongoing: var(--dsw-static-deepseek-450);
+}
+
+/* Colour = the row's primary state, mirroring StateDot's state vocabulary: amber
+   pending interaction, blue live activity, green finished-but-unviewed, red error,
+   the caption grey of a plain chevron for idle/unknown. */
+.forkTwistPrimary { color: var(--dsw-alias-state-warn-primary); }
+.forkTwistOngoing { color: var(--dsh-state-ongoing); }
+.forkTwistDone { color: var(--dsw-alias-state-success-primary); }
+.forkTwistError { color: var(--dsw-alias-state-error-primary); }
+
+/* Live activity breathes instead of rotating: rotation already means
+   "expanded" (.arrowOpen), so it cannot double as a running cue. */
+.forkTwistOngoing > svg { animation: fork-twist-breathe 1.2s ease-in-out infinite; }
+@keyframes fork-twist-breathe {
+  50% { opacity: 0.25; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .sessionRow,
-  .arrow {
+  .arrow,
+  .forkTwistOngoing > svg {
     animation: none;
     transition: none;
   }
