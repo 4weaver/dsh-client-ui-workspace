@@ -32,6 +32,12 @@ assert.strictEqual(typeof registered.factory, 'function', 'factory must be a fun
 // the fork must actually be present, not a stale upstream build
 assert.match(SRC, /deriveGroupForest/, 'fork-tree tree derivation missing from bundle')
 assert.match(SRC, /SessionTreeNodeItem/, 'fork-tree row component missing from bundle')
+// arrow parity with the official project row: plain 16px slot span + .chevron
+// tint + rotating .arrow, no button chrome and no extra width-consuming class
+assert.match(SRC, /forkIndent\{width:var\(--fork-indent/, 'row-level indent rule missing from bundle')
+assert.match(SRC, /forkTwist>svg\{margin-right:-6px\}/, 'shared status-slot chevron rule missing from bundle')
+assert.match(SRC, /_chevron[^"']*forkTwist/, 'chevron must keep the official .chevron colour class')
+assert.ok(!/forkSlot/.test(SRC), 'the old width-adding forkSlot must be gone')
 
 // upstream behaviour that must never be lost
 assert.match(SRC, /deriveFlat/, 'upstream deriveFlat must survive')

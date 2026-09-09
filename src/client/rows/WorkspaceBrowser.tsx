@@ -405,6 +405,32 @@ function SessionTree({
     }
     return map
   }, [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount])
+  // Selecting a session unfolds its branch: every ancestor row of the current
+  // session drops its USER fold (a budget fold is not in `collapsedTreeRows`, so
+  // it stays exactly as the preview computed it). Doing it here, not per row,
+  // also covers ancestors whose rows are not mounted while folded.
+  useEffect(() => {
+    if (current === undefined) return
+    const ancestors = new Set<string>()
+    const walk = (nodes: readonly SessionTreeNode[], path: readonly string[]): boolean => {
+      for (const node of nodes) {
+        if (node.id === current) {
+          for (const id of path) ancestors.add(id)
+          return true
+        }
+        if (walk(node.children, [...path, node.id as string])) return true
+      }
+      return false
+    }
+    for (const forest of forests.values()) {
+      if (walk(forest, [])) break
+    }
+    if (ancestors.size === 0) return
+    setCollapsedTreeRows(keys => {
+      const next = keys.filter(key => !ancestors.has(key))
+      return next.length === keys.length ? keys : next
+    })
+  }, [current, forests])
   const now = Date.now()
   const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
     if (sessionDropCommitted.current) return
@@ -504,8 +530,9 @@ function SessionTree({
           const forestRows = sessionsExpanded ? forest : preview.rows
           // Rows whose preview subtree was dropped render folded, so the caret
           // never claims children that are absent from the DOM. User folds are
-          // additive on top of that.
-          const collapsedTreeIds = new Set<string>()
+          // additive on top of that. A budget-clipped row is absent from the DOM,
+          // so folding it by hand is a no-op (its stand-in row must stay open).
+          const clippedTreeIds = new Set<string>()
           if (!sessionsExpanded) {
             const collect = (nodes: readonly SessionTreeNode[], kept: readonly SessionTreeNode[]): void => {
               for (let i = 0; i < nodes.length; i += 1) {
@@ -515,14 +542,19 @@ function SessionTree({
                 // Fold only rows whose children ALL vanished: a row that kept
                 // some children stays open and the rest ride the overflow button.
                 if (node.children.length > 0 && keptNode.children.length === 0) {
-                  collapsedTreeIds.add(node.id as string)
+                  clippedTreeIds.add(node.id as string)
                 }
                 collect(node.children, keptNode.children)
               }
             }
             collect(forest, preview.rows)
           }
+          // One folded-id set for the whole group: a row is collapsed when the
+          // budget clipped it or the user folded it. The tree renderer reads it
+          // for the row that is actually rendered, including nested rows.
+          const foldedTreeIds = new Set([...clippedTreeIds, ...collapsedTreeRows])
           const onToggleTree = (id: SessionNode['id']) => {
+            if (clippedTreeIds.has(id as string)) return
             setCollapsedTreeRows(keys => toggled(keys, id as string))
           }
           const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
@@ -650,7 +682,7 @@ function SessionTree({
                     onRename={onSessionRename}
                     onFork={forkSession}
                     onArchive={onSessionArchive}
-                    collapsed={collapsedTreeIds.has(node.id) || collapsedTreeRows.includes(node.id as string)}
+                    foldedIds={foldedTreeIds}
                     onToggle={onToggleTree}
                     drag={dragProps}
                     t={t}

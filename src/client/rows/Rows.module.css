@@ -359,13 +359,14 @@
   color: var(--dsw-alias-label-caption);
 }
 
-/* Fork tree: one indent unit; chevron rides the official 16px .slot inside the row. */
-.forkSlot { color: var(--dsw-alias-label-caption); cursor: pointer; }
-/* Pure indentation, no rail (user decision: rail later if wanted). */
-/* display:block is load-bearing: an inline wrapper does not inset the row's
-   content box, so a nested .sessionRow would keep full container width and the
-   indent would be cosmetic only (the 'row width does not follow depth' bug). */
-.forkChild { display: block; padding-left: var(--fork-indent, 16px); }
+/* Fork tree: one indent unit per nesting level, no rail (user decision: rail
+   later if wanted). The row element itself carries the indent so the row keeps
+   its full-width flex box; only its content box follows depth. */
+.forkIndent { flex: none; width: var(--fork-indent, 16px); height: 20px; }
+/* The disclosure glyph reuses the leading status slot's 16px cell: with a
+   visible status dot the two share that cell (paired 2px apart) instead of
+   adding a column, and with no status dot the glyph simply occupies it. */
+.forkTwist > svg { margin-right: -6px; }
 
 @media (prefers-reduced-motion: reduce) {
   .sessionRow,

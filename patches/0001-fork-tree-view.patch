@@ -1,49 +1,36 @@
-diff --git a/packages/client/ui-workspace/src/client/locales.ts b/packages/client/ui-workspace/src/client/locales.ts
-index af0f535b68..a8c82cc889 100644
---- a/packages/client/ui-workspace/src/client/locales.ts
-+++ b/packages/client/ui-workspace/src/client/locales.ts
-@@ -19,6 +19,8 @@ export const zh = {
-   'orderBy.updated': '最近更新',
-   'sessions.expand': '展开其余 {n} 个会话',
-   'sessions.collapse': '收起',
-+  'sessions.twist.expand': '展开分支会话',
-+  'sessions.twist.collapse': '收起分支会话',
-   'empty.none': '暂无会话',
-   'empty.noMatches': '无匹配结果',
-   'workspace.add': '添加工作区',
-@@ -89,6 +91,8 @@ export const en = {
-   'orderBy.updated': 'Last updated',
-   'sessions.expand': 'Show {n} more sessions',
-   'sessions.collapse': 'Show less',
-+  'sessions.twist.expand': 'Expand fork children',
-+  'sessions.twist.collapse': 'Collapse fork children',
-   'empty.none': 'No sessions yet',
-   'empty.noMatches': 'No matches',
-   'workspace.add': 'Add workspace',
 diff --git a/packages/client/ui-workspace/src/client/rows/Rows.module.css b/packages/client/ui-workspace/src/client/rows/Rows.module.css
-index 7208d4d4b1..9e837d3f54 100644
+index 7208d4d4b1..c13d672b8f 100644
 --- a/packages/client/ui-workspace/src/client/rows/Rows.module.css
 +++ b/packages/client/ui-workspace/src/client/rows/Rows.module.css
-@@ -359,6 +359,14 @@
+@@ -359,6 +359,15 @@
    color: var(--dsw-alias-label-caption);
  }
  
-+/* Fork tree: one indent unit; chevron rides the official 16px .slot inside the row. */
-+.forkSlot { color: var(--dsw-alias-label-caption); cursor: pointer; }
-+/* Pure indentation, no rail (user decision: rail later if wanted). */
-+/* display:block is load-bearing: an inline wrapper does not inset the row's
-+   content box, so a nested .sessionRow would keep full container width and the
-+   indent would be cosmetic only (the 'row width does not follow depth' bug). */
-+.forkChild { display: block; padding-left: var(--fork-indent, 16px); }
++/* Fork tree: one indent unit per nesting level, no rail (user decision: rail
++   later if wanted). The row element itself carries the indent so the row keeps
++   its full-width flex box; only its content box follows depth. */
++.forkIndent { flex: none; width: var(--fork-indent, 16px); height: 20px; }
++/* The disclosure glyph reuses the leading status slot's 16px cell: with a
++   visible status dot the two share that cell (paired 2px apart) instead of
++   adding a column, and with no status dot the glyph simply occupies it. */
++.forkTwist > svg { margin-right: -6px; }
 +
  @media (prefers-reduced-motion: reduce) {
    .sessionRow,
    .arrow {
 diff --git a/packages/client/ui-workspace/src/client/rows/Rows.tsx b/packages/client/ui-workspace/src/client/rows/Rows.tsx
-index 0f917100ff..5b867cc3ea 100644
+index 0f917100ff..39613c0420 100644
 --- a/packages/client/ui-workspace/src/client/rows/Rows.tsx
 +++ b/packages/client/ui-workspace/src/client/rows/Rows.tsx
-@@ -16,7 +16,7 @@ import {
+@@ -6,6 +6,7 @@
+  * and workspace hover cards are suppressed while a menu is open.
+  */
+ import { useState } from 'react'
++import type { ReactNode } from 'react'
+ import clsx from 'clsx'
+ import {
+   HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
+@@ -16,7 +17,7 @@ import {
  import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
  import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
  import type { WorkspaceBrowserProps } from '../contract/slots.ts'
@@ -52,19 +39,19 @@ index 0f917100ff..5b867cc3ea 100644
  import css from './Rows.module.css'
  
  /** The standard locale seat, prop-passed from the browser root. */
-@@ -375,7 +375,10 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
+@@ -375,7 +376,10 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
   * @param props.t - the browser root's locale seat.
   * @returns the session row.
   */
 -export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, t }: {
 +export function SessionNodeItem({
 +  node, currentId, now, onOpen, onRename, onFork, onArchive,
-+  drag, flat = false, children, treeCollapsed = false, onToggleTree, t,
++  drag, flat = false, children, depth, treeCollapsed = false, onToggleTree, t,
 +}: {
    node: SessionNode
    currentId: string | undefined
    now: number
-@@ -390,6 +393,14 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+@@ -390,6 +394,14 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
    drag?: RowDragProps | undefined
    /** The row is rendered without a parent Workspace header. */
    flat?: boolean | undefined
@@ -74,37 +61,68 @@ index 0f917100ff..5b867cc3ea 100644
 +  depth?: number | undefined
 +  /** This row's own children are folded away. */
 +  treeCollapsed?: boolean | undefined
-+  /** Disclosure toggle owned by the tree renderer; absent on leaf rows. */
++  /** Fold/unfold this row's subtree (the row click calls it). */
 +  onToggleTree?: ((id: SessionNode['id']) => void) | undefined
    t: RowTranslate
  }) {
    const row = node
-@@ -444,6 +455,24 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+@@ -399,6 +411,14 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+   const primaryStatus = statuses[0]
+   const showStatus = primaryStatus.state !== 'done' || row.completed
+   const [menuOpen, setMenuOpen] = useState(false)
++  // A row shows a disclosure only while it has children to reveal: a folded row
++  // already states itself with a bare closed glyph, and a budget-folded row has
++  // no children in the DOM at all (`children` is undefined outside tree mode).
++  const forkChildren = children !== undefined && children.length > 0
++  // Tree rows take their ARIA from the disclosure state, which the built-in
++  // `role="treeitem"` attribute cannot express: spread a replacement object over
++  // it in tree mode only, so the flat/search rows keep the plain role exactly.
++  const replaceable = children === undefined ? undefined : { collapsed: treeCollapsed }
+   // Archive hides the row through the registry-global archive set and never
+   // touches the session log, so it is not styled as destructive and needs no
+   // confirmation dialog.
+@@ -418,7 +438,11 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+       )}
+       role="treeitem"
+       aria-selected={selected}
+-      onClick={() => { onOpen(node.id) }}
++      // The whole row is the tree's click target: it opens the session AND
++      // unfolds that row's branch, so the disclosure glyph carries no handler
++      // and no nested button (the official project row's span chevron).
++      {...(replaceable !== undefined ? { role: 'treeitem', 'aria-expanded': !replaceable.collapsed } : {})}
++      onClick={() => { onOpen(node.id); onToggleTree?.(node.id) }}
+       draggable={drag !== undefined}
+       onDragStart={drag === undefined
+         ? undefined
+@@ -444,6 +468,27 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
            drag.drop(rowHalf(e))
          }}
      >
-+      {/* Fork-tree disclosure, first child INSIDE the row so it rides the
-+          row's own highlight pill and 16px slot grid. The official project
-+          row sets the precedent (its chevron is a row child, not a wrapper).
-+          Leaf rows keep an empty slot so titles align across depths. */}
-+      {children !== undefined && children.length > 0 && (
-+        <button
-+          type="button"
-+          className={clsx(css.slot, css.forkSlot)}
-+          aria-expanded={!treeCollapsed}
-+          aria-label={treeCollapsed ? t('sessions.twist.expand') : t('sessions.twist.collapse')}
-+          onClick={(e) => { e.stopPropagation(); onToggleTree?.(node.id) }}
++      {/* Pure leading indent for tree rows: the glyph itself is drawn by the
++          row BELOW (into its own leading status slot or before the title), so a
++          nested row costs no extra width. */}
++      {depth !== undefined && depth > 0 && (
++        <span
++          className={css.forkIndent}
++          style={{ ['--fork-indent' as string]: `${depth} * var(--fork-indent-unit, 16px)` }}
++        />
++      )}
++      {/* Fork-tree disclosure: the official project-row chevron (16px .slot +
++          .chevron colour + .arrow rotation) with no button chrome. It rides the
++          row's own leading status slot, so it adds no column of its own; a row
++          whose status dot shares that slot shows both side by side. */}
++      {forkChildren && (
++        <span
++          className={clsx(css.slot, css.chevron, css.forkTwist)}
++          aria-hidden="true"
 +        >
 +          <IconTriangleRightFill14 className={clsx(css.arrow, !treeCollapsed && css.arrowOpen)} />
-+        </button>
++        </span>
 +      )}
-+      {/* Leaf rows in a tree keep an empty slot so titles align across depths;
-+          the hierarchy-free flat list omits it entirely (upstream contract). */}
-+      {children !== undefined && children.length === 0 && <span className={css.slot} />}
        {/* Pending interaction and own or descendant activity outrank the
            finished-but-unviewed reminder, which returns after activity stops
            and is cleared by opening the session. */}
-@@ -499,3 +528,73 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+@@ -499,3 +544,86 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
      />
    )
  }
@@ -121,7 +139,8 @@ index 0f917100ff..5b867cc3ea 100644
 + * @returns the row subtree fragment.
 + */
 +export function SessionTreeNodeItem({
-+  node, currentId, now, onOpen, onRename, onFork, onArchive, depth = 0, collapsed = false, onToggle, drag, t,
++  node, currentId, now, onOpen, onRename, onFork, onArchive,
++  depth = 0, foldedIds, onToggle, drag, t,
 +}: {
 +  node: SessionTreeNode
 +  currentId: string | undefined
@@ -131,55 +150,67 @@ index 0f917100ff..5b867cc3ea 100644
 +  onFork: (id: SessionNode['id']) => void
 +  onArchive: (id: SessionNode['id']) => void
 +  depth?: number | undefined
-+  collapsed?: boolean | undefined
++  /** Every folded row of this group (budget-clipped and user-folded alike). */
++  foldedIds?: ReadonlySet<string> | undefined
 +  onToggle: (id: SessionNode['id']) => void
 +  /** Present only for depth-0 roots; nested rows never initiate a drag. */
 +  drag?: RowDragProps | undefined
 +  t: RowTranslate
 +}) {
 +  const hasChildren = node.children.length > 0
-+  // Indentation lives on a wrapper span, never on the row itself: the row
-+  // must stay a full-width flex child of the list (a wrapper div would
-+  // shrink it to content width and break the highlight pill).
++  const collapsed = foldedIds?.has(node.id as string) === true
++  // The row renders as a bare full-width flex child of the list (no wrapper);
++  // its own leading indent is what makes row width follow tree depth. Selecting
++  // a session unfolds its branch — the renderer owns that, so an ancestor that
++  // is not mounted while folded still gets unfolded.
++  /**
++   * Render one level of fork children, each row inheriting this level's props.
++   * @param children - the rows at this level.
++   * @param level - nesting level of the first entry.
++   * @returns the nested rows in order.
++   */
++  const renderChildren = (children: readonly SessionTreeNode[], level: number): ReactNode[] =>
++    children.map(child => (
++      <SessionTreeNodeItem
++        key={child.id}
++        node={child}
++        currentId={currentId}
++        now={now}
++        onOpen={onOpen}
++        onRename={onRename}
++        onFork={onFork}
++        onArchive={onArchive}
++        depth={level}
++        foldedIds={foldedIds}
++        onToggle={onToggle}
++        t={t}
++      />
++    ))
 +  return (
 +    <>
-+      <span className={depth > 0 ? css.forkChild : undefined}>
-+        <SessionNodeItem
-+          node={node}
-+          currentId={currentId}
-+          now={now}
-+          onOpen={onOpen}
-+          onRename={onRename}
-+          onFork={onFork}
-+          onArchive={onArchive}
-+          children={node.children}
-+          depth={depth}
-+          treeCollapsed={collapsed}
-+          onToggleTree={hasChildren ? onToggle : undefined}
-+          drag={depth === 0 ? drag : undefined}
-+          t={t}
-+        />
-+      </span>
-+      {hasChildren && !collapsed && node.children.map(child => (
-+        <SessionTreeNodeItem
-+          key={child.id}
-+          node={child}
-+          currentId={currentId}
-+          now={now}
-+          onOpen={onOpen}
-+          onRename={onRename}
-+          onFork={onFork}
-+          onArchive={onArchive}
-+          depth={depth + 1}
-+          onToggle={onToggle}
-+          t={t}
-+        />
-+      ))}
++      <SessionNodeItem
++        node={node}
++        currentId={currentId}
++        now={now}
++        onOpen={onOpen}
++        onRename={onRename}
++        onFork={onFork}
++        onArchive={onArchive}
++        children={node.children}
++        depth={depth}
++        treeCollapsed={collapsed}
++        onToggleTree={onToggle}
++        drag={depth === 0 ? drag : undefined}
++        t={t}
++      />
++      {/* Budget-clipped rows are absent from the DOM, so their children render
++          under the row standing in for them instead. */}
++      {hasChildren && !collapsed && renderChildren(node.children, depth + 1)}
 +    </>
 +  )
 +}
 diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
-index 9d9dd376e4..d454522e93 100644
+index 9d9dd376e4..49e33c3d93 100644
 --- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
 +++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
 @@ -21,9 +21,9 @@ import type {
@@ -252,7 +283,7 @@ index 9d9dd376e4..d454522e93 100644
    // Transient drag marker state; the selected mode owns the resulting order.
    const [drag, setDrag] = useState<DragState | null>(null)
    const sessionDropCommitted = useRef(false)
-@@ -347,6 +390,21 @@ function SessionTree({
+@@ -347,6 +390,47 @@ function SessionTree({
      }),
      [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount],
    )
@@ -271,10 +302,36 @@ index 9d9dd376e4..d454522e93 100644
 +    }
 +    return map
 +  }, [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount])
++  // Selecting a session unfolds its branch: every ancestor row of the current
++  // session drops its USER fold (a budget fold is not in `collapsedTreeRows`, so
++  // it stays exactly as the preview computed it). Doing it here, not per row,
++  // also covers ancestors whose rows are not mounted while folded.
++  useEffect(() => {
++    if (current === undefined) return
++    const ancestors = new Set<string>()
++    const walk = (nodes: readonly SessionTreeNode[], path: readonly string[]): boolean => {
++      for (const node of nodes) {
++        if (node.id === current) {
++          for (const id of path) ancestors.add(id)
++          return true
++        }
++        if (walk(node.children, [...path, node.id as string])) return true
++      }
++      return false
++    }
++    for (const forest of forests.values()) {
++      if (walk(forest, [])) break
++    }
++    if (ancestors.size === 0) return
++    setCollapsedTreeRows(keys => {
++      const next = keys.filter(key => !ancestors.has(key))
++      return next.length === keys.length ? keys : next
++    })
++  }, [current, forests])
    const now = Date.now()
    const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
      if (sessionDropCommitted.current) return
-@@ -438,8 +496,35 @@ function SessionTree({
+@@ -438,8 +522,41 @@ function SessionTree({
          )}
          {groups.map((group) => {
            const workspaceId = group.workspaceId
@@ -286,8 +343,9 @@ index 9d9dd376e4..d454522e93 100644
 +          const forestRows = sessionsExpanded ? forest : preview.rows
 +          // Rows whose preview subtree was dropped render folded, so the caret
 +          // never claims children that are absent from the DOM. User folds are
-+          // additive on top of that.
-+          const collapsedTreeIds = new Set<string>()
++          // additive on top of that. A budget-clipped row is absent from the DOM,
++          // so folding it by hand is a no-op (its stand-in row must stay open).
++          const clippedTreeIds = new Set<string>()
 +          if (!sessionsExpanded) {
 +            const collect = (nodes: readonly SessionTreeNode[], kept: readonly SessionTreeNode[]): void => {
 +              for (let i = 0; i < nodes.length; i += 1) {
@@ -297,20 +355,25 @@ index 9d9dd376e4..d454522e93 100644
 +                // Fold only rows whose children ALL vanished: a row that kept
 +                // some children stays open and the rest ride the overflow button.
 +                if (node.children.length > 0 && keptNode.children.length === 0) {
-+                  collapsedTreeIds.add(node.id as string)
++                  clippedTreeIds.add(node.id as string)
 +                }
 +                collect(node.children, keptNode.children)
 +              }
 +            }
 +            collect(forest, preview.rows)
 +          }
++          // One folded-id set for the whole group: a row is collapsed when the
++          // budget clipped it or the user folded it. The tree renderer reads it
++          // for the row that is actually rendered, including nested rows.
++          const foldedTreeIds = new Set([...clippedTreeIds, ...collapsedTreeRows])
 +          const onToggleTree = (id: SessionNode['id']) => {
++            if (clippedTreeIds.has(id as string)) return
 +            setCollapsedTreeRows(keys => toggled(keys, id as string))
 +          }
            const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
              ? workspaceDrag.over.half
              : null
-@@ -525,10 +610,11 @@ function SessionTree({
+@@ -525,10 +642,11 @@ function SessionTree({
                      },
                    }}
                />
@@ -326,7 +389,7 @@ index 9d9dd376e4..d454522e93 100644
                // Session drag never leaves its group. Ungrouped writes only the
                // browser-local account; real Workspaces may also write Host order.
                  const sameGroupDrag = drag !== null && drag.accountKey === group.key
-@@ -555,7 +641,7 @@ function SessionTree({
+@@ -555,7 +673,7 @@ function SessionTree({
                    },
                  }
                  return (
@@ -335,11 +398,11 @@ index 9d9dd376e4..d454522e93 100644
                      key={node.id}
                      node={node}
                      currentId={current}
-@@ -564,12 +650,14 @@ function SessionTree({
+@@ -564,12 +682,14 @@ function SessionTree({
                      onRename={onSessionRename}
                      onFork={forkSession}
                      onArchive={onSessionArchive}
-+                    collapsed={collapsedTreeIds.has(node.id) || collapsedTreeRows.includes(node.id as string)}
++                    foldedIds={foldedTreeIds}
 +                    onToggle={onToggleTree}
                      drag={dragProps}
                      t={t}
@@ -351,7 +414,7 @@ index 9d9dd376e4..d454522e93 100644
                  <button
                    type="button"
                    className={css.sessionOverflowButton}
-@@ -578,7 +666,7 @@ function SessionTree({
+@@ -578,7 +698,7 @@ function SessionTree({
                  >
                    {sessionsExpanded
                      ? t('sessions.collapse')
@@ -498,7 +561,7 @@ index ec921306f9..202211bfa3 100644
   * Derive the flat session list ("In one list" mode): every session — fork
   * children included — as a top-level row, strictly newest-first. No grouping,
 diff --git a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
-index 8ee31d37c9..49b9f15c85 100644
+index 8ee31d37c9..01672c8dcb 100644
 --- a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
 +++ b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
 @@ -453,7 +453,10 @@ describe('WorkspaceBrowser', () => {
@@ -507,25 +570,26 @@ index 8ee31d37c9..49b9f15c85 100644
  
 -  it('renders a fork child as a top-level row without a session twist', () => {
 +  // Fork-tree fork: upstream rc.1 flattens fork children to top-level rows;
-+  // this build nests them under their human parent behind an always-visible
-+  // chevron that lives INSIDE the row (no wrapper element).
++  // this build nests them under their human parent behind the parent row's own
++  // disclosure chevron (the official project-row span, no nested button).
 +  it('nests a fork child under its parent behind the parent row disclosure', () => {
      const parent = summary('parent-s', 2)
      const child = { ...summary('child-s', 1), parentId: parent.id }
      mount({
-@@ -461,9 +464,60 @@ describe('WorkspaceBrowser', () => {
+@@ -461,9 +464,126 @@ describe('WorkspaceBrowser', () => {
        useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
      })
      fireEvent.click(screen.getByText('alpha'))
 -    expect(screen.getByText('child-s')).toBeTruthy()
 -    expect(screen.queryByRole('button', { name: /展开|收起/ })).toBeNull()
 -    expect(screen.getByText('child-s').closest('[role="treeitem"]')?.getAttribute('draggable')).toBe('true')
-+    // the parent exposes the disclosure and starts expanded
-+    const twist = screen.getByRole('button', { name: '收起分支会话' })
-+    expect(twist.getAttribute('aria-expanded')).toBe('true')
-+    // the chevron is a child of the parent's own row element, not a wrapper
++    // the parent row states its own disclosure state, and starts expanded
 +    const parentRow = screen.getByText('parent-s').closest('[role="treeitem"]')
-+    expect(parentRow?.contains(twist)).toBe(true)
++    expect(parentRow?.getAttribute('aria-expanded')).toBe('true')
++    // the glyph is decorative markup inside the row (no button, no handler)
++    const twist = parentRow?.querySelector('[aria-hidden="true"]')
++    expect(twist?.tagName).toBe('SPAN')
++    expect(twist?.querySelector('svg')).toBeTruthy()
 +    // the child row is nested UNDER the parent row, and is not draggable
 +    const childRow = screen.getAllByText('child-s')
 +      .map(node => node.closest('[role="treeitem"]'))
@@ -533,23 +597,84 @@ index 8ee31d37c9..49b9f15c85 100644
 +    expect(parentRow !== null && childRow != null
 +      && (parentRow.compareDocumentPosition(childRow) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
 +    expect(childRow?.getAttribute('draggable')).toBe('false')
-+    expect(childRow?.querySelector('[aria-label="收起分支会话"]')).toBeNull()
-+    // The indent wrapper must be a BLOCK box (display:block in the stylesheet)
-+    // and must contain exactly the one row: an inline wrapper would leave the
-+    // nested row at full container width, which is the width bug this rebuild
-+    // exists to avoid. jsdom cannot measure layout, so assert structure here
-+    // and the built CSS in the bundle-contract/runtime checks.
-+    // Row -> HoverCard wrapper span -> .forkChild indent block.
-+    const wrapper = childRow?.parentElement?.parentElement
-+    expect(wrapper?.className).toContain('forkChild')
-+    expect(wrapper?.firstElementChild?.contains(childRow as Node)).toBe(true)
-+    // the depth-0 parent stays draggable
++    expect(childRow?.querySelector('[aria-hidden="true"]')).toBeNull()
++    // jsdom cannot measure layout, so assert the structure the alignment depends
++    // on: the child row is a bare full-width flex child of the list (no wrapper
++    // span), and its own first element is the leading indent block that makes the
++    // content box follow depth instead of a padded wrapper.
++    // Row -> HoverCard wrapper span -> group section -> the list itself.
++    expect(childRow?.closest('[role="tree"]')).not.toBeNull()
++    const indent = childRow?.firstElementChild
++    expect(indent?.className).toContain('forkIndent')
++    expect(indent?.getAttribute('style')).toContain('--fork-indent')
++    // the depth-0 parent keeps its indent-free leading status slot, and is draggable
++    expect(parentRow?.firstElementChild?.className).not.toContain('forkIndent')
 +    expect(parentRow?.getAttribute('draggable')).toBe('true')
-+    // collapsing the parent hides the child row (its portaled hover copy may stay)
-+    fireEvent.click(twist)
++    // The whole row is the toggle: no button anywhere in the tree, and clicking
++    // the row's title cell folds the branch away.
++    expect(screen.queryAllByRole('button', { name: /分支会话/ })).toHaveLength(0)
++    fireEvent.click(screen.getByText('parent-s'))
 +    expect(screen.queryAllByText('child-s').filter(node => node.closest('[role="treeitem"]') !== null)).toHaveLength(0)
-+    expect(screen.getByRole('button', { name: '展开分支会话' }).getAttribute('aria-expanded')).toBe('false')
++    expect(parentRow?.getAttribute('aria-expanded')).toBe('false')
++    // ... and clicking the row again opens the session and unfolds the branch.
++    fireEvent.click(screen.getByText('parent-s'))
++    expect(parentRow?.getAttribute('aria-expanded')).toBe('true')
++    expect(screen.getAllByText('child-s').filter(node => node.closest('[role="treeitem"]') !== null)).toHaveLength(1)
 +  })
++
++  it('opens the session from anywhere on the row, not just the disclosure', () => {
++    const parent = summary('parent-s', 2)
++    const child = { ...summary('child-s', 1), parentId: parent.id }
++    const open = vi.fn()
++    mount({
++      useSessions: hook(sessionState([parent, child])),
++      useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'child-s'])])),
++      open,
++    })
++    fireEvent.click(screen.getByText('alpha'))
++    // The leading status slot is now part of the click target (it used to hold
++    // the stopPropagation button), as is the title cell.
++    fireEvent.click((screen.getByText('parent-s').closest('[role="treeitem"]') as HTMLElement).firstElementChild as HTMLElement)
++    expect(open).toHaveBeenCalledWith('parent-s')
++    // Same click folds the branch; clicking the row again unfolds it and the
++    // child's title cell is a target of its own.
++    fireEvent.click(screen.getByText('parent-s'))
++    fireEvent.click(screen.getByText('child-s'))
++    expect(open).toHaveBeenCalledWith('child-s')
++  })
++
++  it('auto-expands the selected session\'s branch without fighting a budget fold', () => {
++    // parent -> mid -> leaf, with the selection on the deepest row.
++    const parent = summary('parent-s', 3)
++    const mid = { ...summary('mid-s', 2), parentId: parent.id }
++    const leaf = { ...summary('leaf-s', 1), parentId: mid.id }
++    const sessions = [parent, mid, leaf]
++    const b = mount({
++      useSessions: hook(sessionState(sessions)),
++      useWorkspaces: hook(workspaceState([workspace('alpha', sessions.map(s => s.id))])),
++    })
++    fireEvent.click(screen.getByText('alpha'))
++    const row = (title: string) => screen.getByText(title).closest('[role="treeitem"]') as HTMLElement
++    // The user folds the whole branch by hand...
++    fireEvent.click(screen.getByText('parent-s'))
++    expect(row('parent-s').getAttribute('aria-expanded')).toBe('false')
++    expect(screen.queryAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(0)
++    // ...and selecting a hidden descendant unfolds every ancestor above it.
++    rerender(b, { useSessions: hook(sessionState(sessions, { current: sid('leaf-s') })) })
++    expect(row('parent-s').getAttribute('aria-expanded')).toBe('true')
++    expect(row('mid-s').getAttribute('aria-expanded')).toBe('true')
++    expect(screen.getAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(1)
++    // A manual click always toggles, even on the selected branch's ancestor:
++    // the auto-expand fires on the selection change, not on every render.
++    fireEvent.click(screen.getByText('mid-s'))
++    expect(row('mid-s').getAttribute('aria-expanded')).toBe('false')
++    expect(screen.queryAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(0)
++    // Re-selecting the same session is a new selection change and unfolds again.
++    rerender(b, { useSessions: hook(sessionState(sessions, { current: sid('leaf-s') })) })
++    expect(row('mid-s').getAttribute('aria-expanded')).toBe('true')
++    expect(screen.getAllByText('leaf-s').filter(n => n.closest('[role="treeitem"]') !== null)).toHaveLength(1)
++  })
++
 +
 +  it('budgets the folded preview by total rows so fork children show before Show more', () => {
 +    // root + 5 children = 6 rows under a 5-row budget: the root and its four
@@ -571,6 +696,10 @@ index 8ee31d37c9..49b9f15c85 100644
 +      .map(row => row.querySelector('span[class*="title"]')?.textContent)
 +    expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4'])
 +    expect(screen.getByRole('button', { name: '展开其余 1 个会话' })).toBeTruthy()
++    // Clicking a budget-clipped row's stand-in cannot fold anything: its own
++    // children are gone, so the fold is a no-op and the rows stay rendered.
++    fireEvent.click(screen.getByText('kid-4'))
++    expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4'])
 +    // Expanding reveals the withheld child in place (still nested, in order).
 +    fireEvent.click(screen.getByRole('button', { name: '展开其余 1 个会话' }))
 +    expect(rowTitles()).toEqual(['parent-s', 'kid-1', 'kid-2', 'kid-3', 'kid-4', 'kid-5'])
