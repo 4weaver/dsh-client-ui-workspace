@@ -69,9 +69,12 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
 
 ## How `lib/` is produced
 
-`lib/` is the client-face **tsdown** bundle and is **committed on purpose**, so
-consumers (Nix) need no JS toolchain. It is built by this repository's own
-fork-local preset (`build/client-bundle.ts`, see the Plan A section below) — no
+`lib/` is the client-face **tsdown** bundle and is a **build artifact, NOT
+committed** (removed from git 260910, and `.gitignore`d). Nix's
+`pkgs/dsh-client-ui-forkspace` regenerates it from `src/` on every build, so a
+committed bundle would only add a second, unreproducible source of truth.
+Locally, `npm run bundle` produces it via this repository's own fork-local
+preset (`build/client-bundle.ts`, see the Plan A section below) — no
 monorepo checkout is needed. The bundle inlines `ui-primitives` icons and emits
 the closure factory:
 
@@ -130,7 +133,7 @@ swallowed. The flag makes the type step fail without emitting, and `bundle`
 ```bash
 git checkout -b rebase/<new-tag> <new-tag>
 git apply patches/0001-fork-tree-view.patch   # expect conflicts if upstream touched the browser
-# rebuild lib/ with the new tag's toolchain, commit
+# do NOT commit lib/ — it is gitignored build output; Nix rebuilds it from src/
 ```
 
 `patches/0001-fork-tree-view.patch` carries a small **deliberate divergence
