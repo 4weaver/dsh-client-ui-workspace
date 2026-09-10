@@ -1,7 +1,7 @@
 # dsh-client-ui-forkspace — fork
 
 Vendor fork of the official **`@deepseek-ai/dsh-client-ui-workspace`** package
-(npm, `0.1.2-rc.1`), published under its own name **`@deepseek-ai/dsh-client-ui-forkspace`**,
+(npm, `0.1.2-rc.1`), published under its own name **`dsh-client-ui-forkspace`**,
 adding a **fork-tree view** to the grouped sidebar browser.
 
 ## Why a fork
@@ -75,7 +75,7 @@ toolchain, because the client bundle inlines `ui-primitives` icons and emits the
 closure factory:
 
 ```
-window.__ModuleLoader__.load({ id: "@deepseek-ai/dsh-client-ui-forkspace", factory: ... })
+window.__ModuleLoader__.load({ id: "dsh-client-ui-forkspace", factory: ... })
 ```
 
 The module id is this fork's **own** package name. The host Loader resolves the

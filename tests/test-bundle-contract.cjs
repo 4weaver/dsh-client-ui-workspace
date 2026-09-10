@@ -25,7 +25,7 @@ new Function(SRC)()
 
 assert.ok(registered, 'lib/client.js must call window.__ModuleLoader__.load')
 assert.strictEqual(
-  registered.id, '@deepseek-ai/dsh-client-ui-forkspace',
+  registered.id, 'dsh-client-ui-forkspace',
   "module id must be the fork's own package name (the Loader entry resolves it)",
 )
 assert.strictEqual(typeof registered.factory, 'function', 'factory must be a function')

@@ -3,7 +3,7 @@ description: "dsh Web 客户端的共享 Workspace 浏览器与选择器插件�
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-client-ui-forkspace
+# dsh-client-ui-forkspace
 
 [English](README.md) | 中文
 

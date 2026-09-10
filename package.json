@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-client-ui-forkspace",
+  "name": "dsh-client-ui-forkspace",
   "description": "Fork of @deepseek-ai/dsh-client-ui-workspace (0.1.2-rc.1) adding a fork-tree view to the grouped sidebar browser.",
   "version": "0.1.2-rc.1",
   "publishConfig": {

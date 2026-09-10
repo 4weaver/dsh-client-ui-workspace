@@ -3,7 +3,7 @@ description: "Shared Workspace browser and picker plugin for the dsh web client:
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-client-ui-forkspace
+# dsh-client-ui-forkspace
 
 English | [中文](README.zh.md)
 
