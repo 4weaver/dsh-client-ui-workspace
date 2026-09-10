@@ -1,7 +1,8 @@
-# dsh-client-ui-workspace — fork
+# dsh-client-ui-forkspace — fork
 
 Vendor fork of the official **`@deepseek-ai/dsh-client-ui-workspace`** package
-(npm, `0.1.2-rc.1`), adding a **fork-tree view** to the grouped sidebar browser.
+(npm, `0.1.2-rc.1`), published under its own name **`@deepseek-ai/dsh-client-ui-forkspace`**,
+adding a **fork-tree view** to the grouped sidebar browser.
 
 ## Why a fork
 
@@ -74,11 +75,18 @@ toolchain, because the client bundle inlines `ui-primitives` icons and emits the
 closure factory:
 
 ```
-window.__ModuleLoader__.load({ id: "@deepseek-ai/dsh-client-ui-workspace", factory: ... })
+window.__ModuleLoader__.load({ id: "@deepseek-ai/dsh-client-ui-forkspace", factory: ... })
 ```
 
-The module id must stay the official scoped name — it is the boot-graph key that
-replaces the official package.
+The module id is this fork's **own** package name. The host Loader resolves the
+entry by that name and the browser boot matches the loaded bundle's registration
+id against the row, so the id and the mounted package name must agree. The fork no
+longer shadows the official package by wearing its name: dsh-flake **disables the
+official `id: ui-workspace` Loader row** and mounts this package (via `devMounts`
+in the dev variant) instead. What keeps the downstream consumers working is the
+preserved **slot names** (`sidebar.workspaces`, `conversation.hero.workspace` and
+their `*.directoryFlow` children) and the preserved **cordis service name**
+`uiWorkspace` — nothing about the package name reaches either contract.
 
 Build (from a monorepo checkout on this commit's src):
 
@@ -86,6 +94,11 @@ Build (from a monorepo checkout on this commit's src):
 bash node_modules/.bin/tsdown        # in the monorepo package dir
 cp lib/client.js lib/index.js <fork>/lib/
 ```
+
+The monorepo's `packages/client/tsdown.client.ts` aliases this fork's build name
+onto the `ui-workspace` workspace manifest (no workspace package is named
+`dsh-client-ui-forkspace`), so tsdown stamps the fork id while still reading that
+manifest's production sections.
 
 ## Rebasing on an rc bump
 

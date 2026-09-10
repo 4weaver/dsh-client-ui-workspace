@@ -1,11 +1,12 @@
 /**
  * Bundle contract check — the smallest thing that fails if the fork's built
- * artifact stops being a drop-in replacement for the official package.
+ * artifact stops being a loadable client plugin under its own name.
  *
  * It asserts the three properties the dsh client boot graph depends on:
  *   1. the bundle is a window.__ModuleLoader__ closure-factory registration
- *   2. its module id is EXACTLY the official scoped name (the boot-graph key
- *      that lets this package shadow the official one)
+ *   2. its module id is EXACTLY this fork's own package name — the loader
+ *      resolves the entry by name, and the browser boot matches the loaded
+ *      bundle's registration id against that row
  *   3. the fork-tree code is actually inside it (not a stale pre-fork build)
  *
  * Run: node tests/test-bundle-contract.cjs
@@ -24,8 +25,8 @@ new Function(SRC)()
 
 assert.ok(registered, 'lib/client.js must call window.__ModuleLoader__.load')
 assert.strictEqual(
-  registered.id, '@deepseek-ai/dsh-client-ui-workspace',
-  'module id must stay the official scoped name (boot-graph replacement key)',
+  registered.id, '@deepseek-ai/dsh-client-ui-forkspace',
+  "module id must be the fork's own package name (the Loader entry resolves it)",
 )
 assert.strictEqual(typeof registered.factory, 'function', 'factory must be a function')
 
@@ -49,4 +50,4 @@ assert.ok(!/forkSlot/.test(SRC), 'the old width-adding forkSlot must be gone')
 assert.match(SRC, /deriveFlat/, 'upstream deriveFlat must survive')
 assert.match(SRC, /deriveGroups/, 'upstream deriveGroups must survive')
 
-console.log('ok — bundle contract holds (official id, fork tree present, upstream intact)')
+console.log('ok — bundle contract holds (forkspace id, fork tree present, upstream intact)')
