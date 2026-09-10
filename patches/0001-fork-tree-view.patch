@@ -286,7 +286,7 @@ index 0f91710..89588b2 100644
 +  )
 +}
 diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
-index 9d9dd37..49e33c3 100644
+index 9d9dd37..e3d4b59 100644
 --- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
 +++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
 @@ -21,9 +21,9 @@ import type {
@@ -407,13 +407,33 @@ index 9d9dd37..49e33c3 100644
    const now = Date.now()
    const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
      if (sessionDropCommitted.current) return
-@@ -438,8 +522,41 @@ function SessionTree({
+@@ -421,9 +505,15 @@ function SessionTree({
+       console.warn('workspace reorder rejected:', reason)
+     })
+   }
++  // Hoisted so the optional chain narrows BOTH operands: `workspaceDrag?.over?.id`
++  // is `boolean | undefined`, not a type predicate, so it cannot narrow the
++  // right-hand `workspaceDrag.over` across the `&&`. `over` is null until a
++  // target is hovered, and that must stay falsy here (no top drop indicator).
++  const dragOver = workspaceDrag?.over
+   const workspaceDropAtListStart = groups[0]?.workspaceId !== undefined
+-    && workspaceDrag?.over?.id === groups[0].workspaceId
+-    && workspaceDrag.over.half === 'before'
++    && dragOver !== undefined && dragOver !== null
++    && dragOver.id === groups[0].workspaceId
++    && dragOver.half === 'before'
+ 
+   return (
+     <div className={clsx(css.treeBody, css.wide)}>
+@@ -438,10 +528,49 @@ function SessionTree({
          )}
          {groups.map((group) => {
            const workspaceId = group.workspaceId
 +          // Overflow arithmetic stays on the flat `group.sessions` account.
            const collapsed = collapsedSessionRows(group.sessions)
            const sessionsExpanded = expandedSessionGroups.includes(group.key)
+-          const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
+-            ? workspaceDrag.over.half
 +          const forest = forests.get(group.key) ?? []
 +          const preview = collapsedForestRows(forest)
 +          const forestRows = sessionsExpanded ? forest : preview.rows
@@ -446,10 +466,18 @@ index 9d9dd37..49e33c3 100644
 +            if (clippedTreeIds.has(id as string)) return
 +            setCollapsedTreeRows(keys => toggled(keys, id as string))
 +          }
-           const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
-             ? workspaceDrag.over.half
++          // Same narrowing reason as above: hoist `over` so `?.id` and `.half`
++          // read the SAME narrowed value. `over === null` (drag started, nothing
++          // hovered yet) stays `null`, i.e. no drop marker is rendered.
++          const dragOver = workspaceDrag?.over
++          const workspaceMarker = workspaceId !== undefined
++            && dragOver !== undefined && dragOver !== null
++            && dragOver.id === workspaceId
++            ? dragOver.half
              : null
-@@ -525,10 +642,11 @@ function SessionTree({
+           const workspaceDragProps = workspaceId === undefined ? undefined : {
+             start: () => {
+@@ -525,10 +654,11 @@ function SessionTree({
                      },
                    }}
                />
@@ -465,7 +493,7 @@ index 9d9dd37..49e33c3 100644
                // Session drag never leaves its group. Ungrouped writes only the
                // browser-local account; real Workspaces may also write Host order.
                  const sameGroupDrag = drag !== null && drag.accountKey === group.key
-@@ -555,7 +673,7 @@ function SessionTree({
+@@ -555,7 +685,7 @@ function SessionTree({
                    },
                  }
                  return (
@@ -474,7 +502,7 @@ index 9d9dd37..49e33c3 100644
                      key={node.id}
                      node={node}
                      currentId={current}
-@@ -564,12 +682,14 @@ function SessionTree({
+@@ -564,12 +694,14 @@ function SessionTree({
                      onRename={onSessionRename}
                      onFork={forkSession}
                      onArchive={onSessionArchive}
@@ -490,7 +518,7 @@ index 9d9dd37..49e33c3 100644
                  <button
                    type="button"
                    className={css.sessionOverflowButton}
-@@ -578,7 +698,7 @@ function SessionTree({
+@@ -578,7 +710,7 @@ function SessionTree({
                  >
                    {sessionsExpanded
                      ? t('sessions.collapse')

@@ -505,9 +505,15 @@ function SessionTree({
       console.warn('workspace reorder rejected:', reason)
     })
   }
+  // Hoisted so the optional chain narrows BOTH operands: `workspaceDrag?.over?.id`
+  // is `boolean | undefined`, not a type predicate, so it cannot narrow the
+  // right-hand `workspaceDrag.over` across the `&&`. `over` is null until a
+  // target is hovered, and that must stay falsy here (no top drop indicator).
+  const dragOver = workspaceDrag?.over
   const workspaceDropAtListStart = groups[0]?.workspaceId !== undefined
-    && workspaceDrag?.over?.id === groups[0].workspaceId
-    && workspaceDrag.over.half === 'before'
+    && dragOver !== undefined && dragOver !== null
+    && dragOver.id === groups[0].workspaceId
+    && dragOver.half === 'before'
 
   return (
     <div className={clsx(css.treeBody, css.wide)}>
@@ -557,8 +563,14 @@ function SessionTree({
             if (clippedTreeIds.has(id as string)) return
             setCollapsedTreeRows(keys => toggled(keys, id as string))
           }
-          const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
-            ? workspaceDrag.over.half
+          // Same narrowing reason as above: hoist `over` so `?.id` and `.half`
+          // read the SAME narrowed value. `over === null` (drag started, nothing
+          // hovered yet) stays `null`, i.e. no drop marker is rendered.
+          const dragOver = workspaceDrag?.over
+          const workspaceMarker = workspaceId !== undefined
+            && dragOver !== undefined && dragOver !== null
+            && dragOver.id === workspaceId
+            ? dragOver.half
             : null
           const workspaceDragProps = workspaceId === undefined ? undefined : {
             start: () => {

@@ -1,0 +1,63 @@
+{
+  // FORK PLAN A: the fork-local replacement for the monorepo's
+  // `tsconfig.base.client.json` + `tsconfig.base.json` pair.
+  //
+  // Upstream's client type-emit ran from the monorepo, where this package's
+  // tsconfig extends `../../tsconfig.base.client.json` -> `../../tsconfig.base.json`
+  // to acquire `jsx`, `moduleResolution`, `paths` and the project references
+  // that supply the other @deepseek-ai packages as SOURCE. None of that exists
+  // here, so these are INLINED deliberately rather than extended.
+  //
+  // The one behavioural difference from upstream: cross-package imports resolve
+  // through real npm packages at the exact matching version (0.1.2-rc.1, the
+  // version this fork vendored) instead of through source `paths`. That is the
+  // whole point — the fork must build outside the monorepo.
+  //
+  // Only the CLIENT half is emitted (src/client/**). The Node half is a
+  // three-line `apply` and is committed in lib/index.js; re-emitting it would
+  // need a second program and is out of scope for the client bundle.
+  //
+  // Run via `npm run build:types`. The Client bundle pass consumes
+  // lib/types/client/index.js, which does NOT exist in a bare checkout.
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    // Two roots: `src/client` -> lib/types/client (the Client pass's entry) and
+    // `src/index.ts` -> lib/types/index.js (the Node half). tsc emits both from
+    // one program because the node half is a pure 2-line `apply`; the local
+    // preset's clientLibraryConfig still bundles lib/types/index.js into the
+    // committed lib/index.js.
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    // Both are required together and were inherited from the monorepo base:
+    // the sources import their siblings with explicit `.ts`/`.tsx` extensions
+    // (upstream's convention), which TS rejects while emitting unless
+    // `allowImportingTsExtensions` is on, and `rewriteRelativeImportExtensions`
+    // is what strips the extension back off in the emitted JS so the bundle
+    // resolves it normally.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // `types: []` keeps @types/* out of the program: this is browser code, and
+    // upstream's base set `types: ["node"]` only for the MONOREPO's tooling.
+    // The fork's src has zero `process.env` references, so the ambient
+    // `client-build-environment` declaration upstream injected is not needed.
+    "types": []
+  },
+  "include": ["src"]
+}

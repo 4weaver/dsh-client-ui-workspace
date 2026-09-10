@@ -13,7 +13,7 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
 
 ## What changed
 
-`patches/0001-fork-tree-view.patch` — 6 files (`+672/−25`), all inside
+`patches/0001-fork-tree-view.patch` — 6 files (`+747/−29`), all inside
 `packages/client/ui-workspace`:
 
 - `src/client/tree.ts` (+119) — `deriveGroupForest()` + `SessionTreeNode` nest a
@@ -70,9 +70,10 @@ way to get a tree is to replace the `sidebar.workspaces` occupant itself.
 ## How `lib/` is produced
 
 `lib/` is the client-face **tsdown** bundle and is **committed on purpose**, so
-consumers (Nix) need no JS toolchain. It must be built with the monorepo
-toolchain, because the client bundle inlines `ui-primitives` icons and emits the
-closure factory:
+consumers (Nix) need no JS toolchain. It is built by this repository's own
+fork-local preset (`build/client-bundle.ts`, see the Plan A section below) — no
+monorepo checkout is needed. The bundle inlines `ui-primitives` icons and emits
+the closure factory:
 
 ```
 window.__ModuleLoader__.load({ id: "dsh-client-ui-forkspace", factory: ... })
@@ -88,17 +89,41 @@ preserved **slot names** (`sidebar.workspaces`, `conversation.hero.workspace` an
 their `*.directoryFlow` children) and the preserved **cordis service name**
 `uiWorkspace` — nothing about the package name reaches either contract.
 
-Build (from a monorepo checkout on this commit's src):
+### Fork-local build preset (Plan A)
+
+`tsdown.config.ts` no longer imports the monorepo's `../tsdown.client.ts`. The
+fork carries its own preset so a build sources **only** this repository:
+
+| file | origin | why a copy |
+| --- | --- | --- |
+| `build/client-bundle.ts` | `packages/client/tsdown.client.ts` | the preset itself; `REPOSITORY_ROOT` / `browserSourcePath` / `workspaceManifest` re-derived for a flat repo |
+| `build/client-build-environment.ts` | `scripts/client-build-environment.ts` (copied **wholesale**, 393 lines) | `scripts/` has no `package.json` and is published as no package; the consumed `clientBuildEnvironmentDefines` threads into module-private `clientBuildEnvironment`, so a partial copy would not be self-contained |
+| `build/optional-string-array.ts` | `packages/client/modules/src/client/manifest.ts` lines 130-146 | `optionalStringArray` is defined in the published node half but absent from its export list, so no import path reaches it |
+
+Only `PLATFORM_MODULES` / `PRELOADED_CLIENT_EXTERNALS` come from a real
+dependency: the published `@deepseek-ai/dsh-client-web`, whose `lib/index.js:283`
+exports both.
+
+**These three files are FORK COPIES, not dependencies.** On every upstream rc
+bump they must be re-diffed against their sources; each carries a header naming
+its origin, the base tag, and its rebase obligation. Search for `FORK PLAN A`
+to list every deliberate divergence in `build/client-bundle.ts` (40 code lines).
+
+Build with this repo alone:
 
 ```bash
-bash node_modules/.bin/tsdown        # in the monorepo package dir
-cp lib/client.js lib/index.js <fork>/lib/
+npm install --legacy-peer-deps   # MANDATORY on npm 10.9.8 (plain install crashes
+                                 # the arborist on tsdown's optional peer)
+npm run build:types              # tsc, HARD GATE: --noEmitOnError
+npx tsdown --config-loader unrun # emits lib/client.js, id dsh-client-ui-forkspace
 ```
 
-The monorepo's `packages/client/tsdown.client.ts` aliases this fork's build name
-onto the `ui-workspace` workspace manifest (no workspace package is named
-`dsh-client-ui-forkspace`), so tsdown stamps the fork id while still reading that
-manifest's production sections.
+`build:types` passes `--noEmitOnError` **on purpose**. `tsc` defaults to
+`noEmitOnError: false`, so without the flag a type error still exits 2 while
+emitting the JS — tsdown then bundles the broken output and the error is
+swallowed. The flag makes the type step fail without emitting, and `bundle`
+(`build:types && tsdown`) stops if it fails.
+
 
 ## Rebasing on an rc bump
 
@@ -107,6 +132,31 @@ git checkout -b rebase/<new-tag> <new-tag>
 git apply patches/0001-fork-tree-view.patch   # expect conflicts if upstream touched the browser
 # rebuild lib/ with the new tag's toolchain, commit
 ```
+
+`patches/0001-fork-tree-view.patch` carries a small **deliberate divergence
+from upstream** in `src/client/rows/WorkspaceBrowser.tsx`: the two `workspaceDrag`
+drop-marker sites hoist `const dragOver = workspaceDrag?.over` and guard it with an
+explicit `dragOver !== undefined && dragOver !== null` before reading `.id` /
+`.half`.
+
+Why: `over` is `{ id, half } | null`, and the original upstream expression
+`workspaceDrag?.over?.id === X && workspaceDrag.over.half === Y` does **not**
+narrow — the left operand of `&&` is `boolean | undefined`, not a type predicate,
+so `TS18047: 'workspaceDrag.over' is possibly 'null'` fires under `strict`.
+Upstream's monorepo masks this because it type-checks the package through
+`paths`-based **source** resolution; this fork resolves the same dependencies as
+real npm packages, which exposes it. Upstream CI is green and this fork's
+standalone `tsc` was not. `over === null` is a real reachable state (set on drag
+start, before any target is hovered) and must stay falsy — the guard preserves
+that exactly.
+
+**On a rebase, keep this fix** (the patch reapplies it). Drop it only if upstream
+has fixed the narrowing itself.
+A runnable check guards the behaviour: `node tests/workspace-drop-marker-over-null.cjs`
+asserts `over === null` stays falsy/null and that the fixed expressions are
+`===` the old ones across every reachable drag state (idle, started-but-nothing-
+hovered, hovered-here, hovered-elsewhere).
+
 
 ## Credits
 
